@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "pointer-generator"
+version = "0.1.0"
+description = ""
+authors = ["Miroslav Mlynarik <mmlynarik@sk.uss.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+transformers = "^4.28.1"
+torch = "^2.0.0"
+pandas = "^2.0.1"
+datasets = "^2.12.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.black]
+line-length = 110

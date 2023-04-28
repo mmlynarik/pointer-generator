@@ -15,6 +15,7 @@
 # ==============================================================================
 
 """This file contains code to process data into batches"""
+from typing import List
 
 import Queue
 from random import shuffle
@@ -28,7 +29,7 @@ import data
 class Example(object):
   """Class representing a train/val/test example for text summarization."""
 
-  def __init__(self, article, abstract_sentences, vocab, hps):
+  def __init__(self, article: str, abstract_sentences: List[str], vocab: Vocab, hps):
     """Initializes the Example, performing tokenization and truncation to produce the encoder, decoder and target sequences, which are stored in self.
 
     Args:
@@ -167,7 +168,7 @@ class Batch(object):
     for i, ex in enumerate(example_list):
       self.enc_batch[i, :] = ex.enc_input[:]
       self.enc_lens[i] = ex.enc_len
-      for j in xrange(ex.enc_len):
+      for j in range(ex.enc_len):
         self.enc_padding_mask[i][j] = 1
 
     # For pointer-generator mode, need to store some extra info
@@ -204,7 +205,7 @@ class Batch(object):
     for i, ex in enumerate(example_list):
       self.dec_batch[i, :] = ex.dec_input[:]
       self.target_batch[i, :] = ex.target[:]
-      for j in xrange(ex.dec_len):
+      for j in range(ex.dec_len):
         self.dec_padding_mask[i][j] = 1
 
   def store_orig_strings(self, example_list):
@@ -250,12 +251,12 @@ class Batcher(object):
 
     # Start the threads that load the queues
     self._example_q_threads = []
-    for _ in xrange(self._num_example_q_threads):
+    for _ in range(self._num_example_q_threads):
       self._example_q_threads.append(Thread(target=self.fill_example_queue))
       self._example_q_threads[-1].daemon = True
       self._example_q_threads[-1].start()
     self._batch_q_threads = []
-    for _ in xrange(self._num_batch_q_threads):
+    for _ in range(self._num_batch_q_threads):
       self._batch_q_threads.append(Thread(target=self.fill_batch_queue))
       self._batch_q_threads[-1].daemon = True
       self._batch_q_threads[-1].start()
@@ -316,13 +317,13 @@ class Batcher(object):
       if self._hps.mode != 'decode':
         # Get bucketing_cache_size-many batches of Examples into a list, then sort
         inputs = []
-        for _ in xrange(self._hps.batch_size * self._bucketing_cache_size):
+        for _ in range(self._hps.batch_size * self._bucketing_cache_size):
           inputs.append(self._example_queue.get())
         inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
 
         # Group the sorted Examples into batches, optionally shuffle the batches, and place in the batch queue.
         batches = []
-        for i in xrange(0, len(inputs), self._hps.batch_size):
+        for i in range(0, len(inputs), self._hps.batch_size):
           batches.append(inputs[i:i + self._hps.batch_size])
         if not self._single_pass:
           shuffle(batches)
@@ -331,7 +332,7 @@ class Batcher(object):
 
       else: # beam search decode mode
         ex = self._example_queue.get()
-        b = [ex for _ in xrange(self._hps.batch_size)]
+        b = [ex for _ in range(self._hps.batch_size)]
         self._batch_queue.put(Batch(b, self._hps, self._vocab))
 
 

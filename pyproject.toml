@@ -6,17 +6,23 @@ authors = ["Miroslav Mlynarik <mmlynarik@sk.uss.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.8,<3.12"
 transformers = "^4.28.1"
 torch = "^2.0.0"
 pandas = "^2.0.1"
 datasets = "^2.12.0"
+black = "^23.3.0"
+huggingface-download-cli = "^1.0.3"
+tokenizers = "^0.13.3"
+tensorflow = "^2.12.0"
 
+
+[tool.poetry.group.dev.dependencies]
+pycodestyle = "^2.10.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
 
 [tool.black]
 line-length = 110

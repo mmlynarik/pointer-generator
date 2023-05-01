@@ -1,17 +1,9 @@
-from pathlib import Path
-
 import tokenizers
 from transformers import PreTrainedTokenizerFast
 from tokenizers import models, normalizers, pre_tokenizers, trainers
 from datasets import load_dataset
 
-ROOT = Path().resolve()
-TOKENIZER_DIR = str(ROOT / "src" / "trained_tokenizer")
-UNK_TOKEN = "[UNK]"
-PAD_TOKEN = "[PAD]"
-START_TOKEN = "[START]"
-END_TOKEN = "[STOP]"
-SPECIAL_TOKENS = [UNK_TOKEN, PAD_TOKEN, START_TOKEN, END_TOKEN]
+from config import UNK_TOKEN, SPECIAL_TOKENS, TOKENIZER_DIR
 
 dataset = load_dataset("cnn_dailymail", name="3.0.0")
 train_dataset = dataset["train"]

@@ -41,28 +41,28 @@ class Example(object):
         self.hps = hps
 
         # Get ids of special tokens
-        start_decoding = vocab.word2id(data.START_TOKEN)
-        stop_decoding = vocab.word2id(data.STOP_TOKEN)
+        start_token_id = vocab.word2id(data.START_TOKEN)
+        stop_token_id = vocab.word2id(data.STOP_TOKEN)
 
-        # Process the article
+        # Get article tokens and truncate to max_enc_steps if needed
         article_words = article.split()
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[: hps.max_enc_steps]
         self.enc_len = len(article_words)  # store the length after truncation but before padding
-        self.enc_input = [
-            vocab.word2id(w) for w in article_words
-        ]  # list of word ids; OOVs are represented by the id for UNK token
 
-        # Process the abstract
+        # list of word ids; OOVs are represented by the id for UNK token
+        self.enc_input = [vocab.word2id(w) for w in article_words]
+
+        # Get abstract tokens
         abstract = " ".join(abstract_sentences)  # string
         abstract_words = abstract.split()  # list of strings
-        abs_ids = [
-            vocab.word2id(w) for w in abstract_words
-        ]  # list of word ids; OOVs are represented by the id for UNK token
+
+        # list of word ids; OOVs are represented by the id for UNK token
+        abs_ids = [vocab.word2id(w) for w in abstract_words]
 
         # Get the decoder input sequence and target sequence
         self.dec_input, self.target = self.get_dec_inp_targ_seqs(
-            abs_ids, hps.max_dec_steps, start_decoding, stop_decoding
+            abs_ids, hps.max_dec_steps, start_token_id, stop_token_id
         )
         self.dec_len = len(self.dec_input)
 
@@ -76,7 +76,7 @@ class Example(object):
 
             # Overwrite decoder target sequence so it uses the temp article OOV ids
             _, self.target = self.get_dec_inp_targ_seqs(
-                abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding
+                abs_ids_extend_vocab, hps.max_dec_steps, start_token_id, stop_token_id
             )
 
         # Store the original strings
@@ -84,8 +84,8 @@ class Example(object):
         self.original_abstract = abstract
         self.original_abstract_sents = abstract_sentences
 
-    def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
-        """Given the reference summary as a sequence of tokens, return the input sequence for the decoder, and the target sequence which we will use to calculate loss. The sequence will be truncated if it is longer than max_len. The input sequence must start with the start_id and the target sequence must end with the stop_id (but not if it's been truncated).
+    def get_dec_inp_targ_seqs(self, sequence: list[int], max_len: int, start_id: int, stop_id: int):
+        """Given the reference summary as a sequence of tokens, return the input sequence for the decoder, and the target sequence which will be used to calculate loss. The sequence will be truncated if it is longer than max_len. The input sequence must start with the start_id and the target sequence must end with the stop_id (but not if it's been truncated).
 
         Args:
         sequence: List of ids (integers)
@@ -139,7 +139,7 @@ class Batch(object):
         self.init_decoder_seq(example_list, hps)  # initialize the input and targets for the decoder
         self.store_orig_strings(example_list)  # store the original strings
 
-    def init_encoder_seq(self, example_list, hps):
+    def init_encoder_seq(self, example_list: list[Example], hps):
         """Initializes the following:
             self.enc_batch:
             numpy array of shape (batch_size, <=max_enc_steps) containing integer ids (all OOVs represented by UNK id), padded to length of longest sequence in the batch
@@ -187,7 +187,7 @@ class Batch(object):
         for i, ex in enumerate(example_list):
             self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
-    def init_decoder_seq(self, example_list, hps):
+    def init_decoder_seq(self, example_list: list[Example], hps):
         """Initializes the following:
         self.dec_batch:
         numpy array of shape (batch_size, max_dec_steps), containing integer ids as input for the decoder, padded to max_dec_steps length.

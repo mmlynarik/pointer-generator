@@ -83,7 +83,7 @@ class Vocab(object):
             % (self._count, self._id_to_word[self._count - 1])
         )
 
-    def word2id(self, word):
+    def word2id(self, word) -> int:
         """Returns the id (integer) of a word (string). Returns [UNK] id if word is OOV."""
         if word not in self._word_to_id:
             return self._word_to_id[UNKNOWN_TOKEN]
@@ -253,7 +253,7 @@ def abstract2sents(abstract: str) -> list[str]:
             end_p = abstract.index(SENT_END, start_p + 1)
             cur = end_p + len(SENT_END)
             sents.append(abstract[start_p + len(SENT_START) : end_p])
-        except ValueError as e:  # no more sentences
+        except ValueError:  # no more sentences
             return sents
 
 

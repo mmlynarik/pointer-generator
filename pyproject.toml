@@ -6,7 +6,7 @@ authors = ["Miroslav Mlynarik <mmlynarik@sk.uss.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.12"
+python = ">=3.9,<3.12"
 transformers = "^4.28.1"
 torch = "^2.0.0"
 pandas = "^2.0.1"

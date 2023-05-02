@@ -307,32 +307,27 @@ class Batcher(object):
 
         while True:
             try:
-                (
-                    article,
-                    abstract,
-                ) = (
-                    input_gen.next()
-                )  # read the next example from file. article and abstract are both strings.
+                # Read the next example from bin file. article and abstract are both strings.
+                article, abstract = input_gen.next()
             except StopIteration:  # if there are no more examples:
                 tf.logging.info(
                     "The example generator for this example queue filling thread has exhausted data."
                 )
                 if self._single_pass:
                     tf.logging.info(
-                        "single_pass mode is on, so we've finished reading dataset. This thread is stopping."
+                        "Single_pass mode is on, so we've finished reading dataset. This thread is stopping."
                     )
                     self._finished_reading = True
                     break
                 else:
                     raise Exception(
-                        "single_pass mode is off but the example generator is out of data; error."
+                        "Single_pass mode is off but the example generator is out of data; error."
                     )
 
-        abstract_sentences = [
-            sent.strip() for sent in data.abstract2sents(abstract)
-        ]  # Use the <s> and </s> tags in abstract to get a list of sentences.
-        example = Example(article, abstract_sentences, self._vocab, self._hps)  # Process into an Example.
-        self._example_queue.put(example)  # place the Example in the example queue.
+            # Use the <s> and </s> tags in abstract to get a list of sentences.
+            abstract_sentences = [sent.strip() for sent in data.abstract2sents(abstract)]
+            example = Example(article, abstract_sentences, self._vocab, self._hps)  # Process into an Example.
+            self._example_queue.put(example)  # place the Example in the example queue.
 
     def fill_batch_queue(self):
         """Takes Examples out of example queue, sorts them by encoder sequence length, processes into Batches and places them in the batch queue.

@@ -126,7 +126,7 @@ class Example(object):
 class Batch(object):
     """Class representing a minibatch of train/val/test examples for text summarization."""
 
-    def __init__(self, example_list, hps, vocab):
+    def __init__(self, example_list: list[Example], hps, vocab: data.Vocab):
         """Turns the example_list into a Batch object.
 
         Args:
@@ -173,8 +173,8 @@ class Batch(object):
         for i, ex in enumerate(example_list):
             self.enc_batch[i, :] = ex.enc_input[:]
             self.enc_lens[i] = ex.enc_len
-        for j in range(ex.enc_len):
-            self.enc_padding_mask[i][j] = 1
+            for j in range(ex.enc_len):
+                self.enc_padding_mask[i][j] = 1
 
         # For pointer-generator mode, need to store some extra info
         if hps.pointer_gen:
@@ -184,8 +184,8 @@ class Batch(object):
             self.art_oovs = [ex.article_oovs for ex in example_list]
             # Store the version of the enc_batch that uses the article OOV ids
             self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-        for i, ex in enumerate(example_list):
-            self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
+            for i, ex in enumerate(example_list):
+                self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
     def init_decoder_seq(self, example_list: list[Example], hps):
         """Initializes the following:
@@ -213,13 +213,11 @@ class Batch(object):
         for j in range(ex.dec_len):
             self.dec_padding_mask[i][j] = 1
 
-    def store_orig_strings(self, example_list):
+    def store_orig_strings(self, example_list: list[Example]):
         """Store the original article and abstract strings in the Batch object"""
-        self.original_articles = [ex.original_article for ex in example_list]  # list of lists
-        self.original_abstracts = [ex.original_abstract for ex in example_list]  # list of lists
-        self.original_abstracts_sents = [
-            ex.original_abstract_sents for ex in example_list
-        ]  # list of list of lists
+        self.original_articles = [ex.original_article for ex in example_list]  # list of strings
+        self.original_abstracts = [ex.original_abstract for ex in example_list]  # list of strings
+        self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list]  # list of list of strings
 
 
 class Batcher(object):
@@ -227,7 +225,7 @@ class Batcher(object):
 
     BATCH_QUEUE_MAX = 100  # max number of batches the batch_queue can hold
 
-    def __init__(self, data_path, vocab, hps, single_pass):
+    def __init__(self, data_path: str, vocab: data.Vocab, hps, single_pass: bool):
         """Initialize the batcher. Start threads that process the data into batches.
 
         Args:
@@ -254,26 +252,24 @@ class Batcher(object):
         else:
             self._num_example_q_threads = 16  # num threads to fill example queue
             self._num_batch_q_threads = 4  # num threads to fill batch queue
-            self._bucketing_cache_size = (
-                100  # how many batches-worth of examples to load into cache before bucketing
-            )
+            self._bucketing_cache_size = 100  # num of multiples of batch_size of examples to load into cache
 
         # Start the threads that load the queues
-        self._example_q_threads = []
+        self._example_q_threads: list[Thread] = []
         for _ in range(self._num_example_q_threads):
             self._example_q_threads.append(Thread(target=self.fill_example_queue))
             self._example_q_threads[-1].daemon = True
             self._example_q_threads[-1].start()
-            self._batch_q_threads = []
+
+        self._batch_q_threads: list[Thread] = []
         for _ in range(self._num_batch_q_threads):
             self._batch_q_threads.append(Thread(target=self.fill_batch_queue))
             self._batch_q_threads[-1].daemon = True
             self._batch_q_threads[-1].start()
 
         # Start a thread that watches the other threads and restarts them if they're dead
-        if (
-            not single_pass
-        ):  # We don't want a watcher in single_pass mode because the threads shouldn't run forever
+        if not single_pass:
+            # We don't want a watcher in single_pass mode because the threads shouldn't run forever
             self._watch_thread = Thread(target=self.watch_threads)
             self._watch_thread.daemon = True
             self._watch_thread.start()
@@ -326,8 +322,8 @@ class Batcher(object):
 
             # Use the <s> and </s> tags in abstract to get a list of sentences.
             abstract_sentences = [sent.strip() for sent in data.abstract2sents(abstract)]
-            example = Example(article, abstract_sentences, self._vocab, self._hps)  # Process into an Example.
-            self._example_queue.put(example)  # place the Example in the example queue.
+            example = Example(article, abstract_sentences, self._vocab, self._hps)  # Construct example
+            self._example_queue.put(example)  # Place example in the example queue.
 
     def fill_batch_queue(self):
         """Takes Examples out of example queue, sorts them by encoder sequence length, processes into Batches and places them in the batch queue.
@@ -340,10 +336,10 @@ class Batcher(object):
                 inputs = []
                 for _ in range(self._hps.batch_size * self._bucketing_cache_size):
                     inputs.append(self._example_queue.get())
-                    inputs = sorted(inputs, key=lambda inp: inp.enc_len)  # sort by length of encoder sequence
+                inputs = sorted(inputs, key=lambda inp: inp.enc_len)  # sort by length of encoder sequence
 
                 # Group the sorted Examples into batches, optionally shuffle the batches, and place in the batch queue.
-                batches = []
+                batches: list[list[Example]] = []
                 for i in range(0, len(inputs), self._hps.batch_size):
                     batches.append(inputs[i : i + self._hps.batch_size])
                 if not self._single_pass:
@@ -395,4 +391,4 @@ class Batcher(object):
             if len(article_text) == 0:  # See https://github.com/abisee/pointer-generator/issues/1
                 tf.logging.warning("Found an example with empty article text. Skipping it.")
             else:
-                yield (article_text, abstract_text)
+                yield article_text, abstract_text

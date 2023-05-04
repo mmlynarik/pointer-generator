@@ -257,14 +257,12 @@ class Batcher(object):
         # Start the threads that load the queues
         self._example_q_threads: list[Thread] = []
         for _ in range(self._num_example_q_threads):
-            self._example_q_threads.append(Thread(target=self.fill_example_queue))
-            self._example_q_threads[-1].daemon = True
+            self._example_q_threads.append(Thread(target=self.fill_example_queue, daemon=True))
             self._example_q_threads[-1].start()
 
         self._batch_q_threads: list[Thread] = []
         for _ in range(self._num_batch_q_threads):
-            self._batch_q_threads.append(Thread(target=self.fill_batch_queue))
-            self._batch_q_threads[-1].daemon = True
+            self._batch_q_threads.append(Thread(target=self.fill_batch_queue, daemon=True))
             self._batch_q_threads[-1].start()
 
         # Start a thread that watches the other threads and restarts them if they're dead
@@ -293,8 +291,7 @@ class Batcher(object):
             tf.logging.info("Finished reading dataset in single_pass mode.")
             return None
 
-        batch = self._batch_queue.get()  # get the next Batch
-        return batch
+        return self._batch_queue.get()  # get the next Batch
 
     def fill_example_queue(self):
         """Reads data from file and processes into Examples which are then placed into the example queue."""
@@ -326,9 +323,8 @@ class Batcher(object):
             self._example_queue.put(example)  # Place example in the example queue.
 
     def fill_batch_queue(self):
-        """Takes Examples out of example queue, sorts them by encoder sequence length, processes into Batches and places them in the batch queue.
-
-        In decode mode, makes batches that each contain a single example repeated.
+        """
+        Fetches bucketing_cache_size-many batches of Examples out of example queue, sorts them by encoder sequence length, processes into Batches, optionally shuffles generated batches and places them in the batch queue. In decode mode, makes batches that each contain a single example repeated.
         """
         while True:
             if self._hps.mode != "decode":

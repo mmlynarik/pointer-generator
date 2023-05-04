@@ -1876,6 +1876,21 @@ urllib3 = ">=1.25.10"
 tests = ["coverage (>=6.0.0)", "flake8", "mypy", "pytest (>=4.6)", "pytest-cov", "pytest-localserver", "types-mock", "types-requests"]
 
 [[package]]
+name = "rouge"
+version = "1.0.1"
+description = "Full Python ROUGE Score Implementation (not a wrapper)"
+category = "main"
+optional = false
+python-versions = "*"
+files = [
+    {file = "rouge-1.0.1-py3-none-any.whl", hash = "sha256:28d118536e8c774dc47d1d15ec266479b4dd0914c4672ce117d4002789bdc644"},
+    {file = "rouge-1.0.1.tar.gz", hash = "sha256:12b48346ca47d6bcf3c45061f315452b9ccec0620ee895ec85b7efc3d54aae34"},
+]
+
+[package.dependencies]
+six = "*"
+
+[[package]]
 name = "rsa"
 version = "4.9"
 description = "Pure-Python RSA implementation"
@@ -2743,4 +2758,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.12"
-content-hash = "8e611c7454f6734537c2c78e25ab1741c8bdc00b7a21f5a03f95287b97348edc"
+content-hash = "ec2321d1d5875c8b7cd1fc8d8d89ab25699a374f8c7c967c7cbda90109164483"

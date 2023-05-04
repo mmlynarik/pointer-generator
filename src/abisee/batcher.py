@@ -15,7 +15,7 @@
 # ==============================================================================
 
 """This file contains code to process data into batches"""
-from typing import List
+from typing import Optional
 
 import queue
 from random import shuffle
@@ -29,7 +29,7 @@ import data
 class Example(object):
     """Class representing a train/val/test example for text summarization."""
 
-    def __init__(self, article: str, abstract_sentences: List[str], vocab: data.Vocab, hps):
+    def __init__(self, article: str, abstract_sentences: list[str], vocab: data.Vocab, hps):
         """Initializes the Example, performing tokenization and truncation to produce the encoder, decoder and target sequences, which are stored in self.
 
         Args:
@@ -272,7 +272,7 @@ class Batcher(object):
             self._watch_thread.daemon = True
             self._watch_thread.start()
 
-    def next_batch(self):
+    def next_batch(self) -> Optional[Batch]:
         """Return a Batch from the batch queue.
 
         If mode='decode' then each batch contains a single example repeated beam_size-many times; this is necessary for beam search.

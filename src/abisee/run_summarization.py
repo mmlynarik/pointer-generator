@@ -162,7 +162,7 @@ def setup_training(model, batcher):
         restore_best_model()
     saver = tf.train.Saver(max_to_keep=3)  # keep 3 checkpoints at a time
 
-    sv = tf.train.Supervisor(
+    supervisor = tf.train.Supervisor(
         logdir=train_dir,
         is_chief=True,
         saver=saver,
@@ -171,18 +171,18 @@ def setup_training(model, batcher):
         save_model_secs=60,  # checkpoint every 60 secs
         global_step=model.global_step
     )
-    summary_writer = sv.summary_writer
+    summary_writer = supervisor.summary_writer
     tf.logging.info("Preparing or waiting for session...")
-    sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
+    sess_context_manager = supervisor.prepare_or_wait_for_session(config=util.get_config())
     tf.logging.info("Created session.")
     try:
-        run_training(model, batcher, sess_context_manager, sv, summary_writer)  # this is an infinite loop until interrupted
+        run_training(model, batcher, sess_context_manager, summary_writer)  # infinite loop
     except KeyboardInterrupt:
         tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
-        sv.stop()
+        supervisor.stop()
 
 
-def run_training(model, batcher, sess_context_manager, sv, summary_writer):
+def run_training(model: SummarizationModel, batcher: Batcher, sess_context_manager, summary_writer):
     """Repeatedly runs training iterations, logging loss to screen and writing summaries"""
     tf.logging.info("starting run_training")
     with sess_context_manager as sess:

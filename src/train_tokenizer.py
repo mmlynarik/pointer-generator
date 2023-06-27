@@ -1,5 +1,4 @@
-import tokenizers
-from tokenizers import models, normalizers, pre_tokenizers, trainers
+from tokenizers import models, normalizers, pre_tokenizers, trainers, Tokenizer
 from datasets import load_dataset, Dataset
 from transformers import PreTrainedTokenizerFast
 
@@ -29,7 +28,7 @@ def train_tokenizer_on_dataset(train_dataset: Dataset) -> PreTrainedTokenizerFas
     pre_tokenizer = pre_tokenizers.Whitespace()
     trainer = trainers.WordLevelTrainer(vocab_size=50000, special_tokens=SPECIAL_TOKENS)
 
-    tokenizer = tokenizers.Tokenizer(model=models.WordLevel(unk_token=UNK_TOKEN))
+    tokenizer = Tokenizer(model=models.WordLevel(unk_token=UNK_TOKEN))
     tokenizer.normalizer = normalizer
     tokenizer.pre_tokenizer = pre_tokenizer
     tokenizer.train_from_iterator(train_dataset["tokenizer_training_string"], trainer=trainer)
@@ -46,7 +45,11 @@ def train_tokenizer_on_dataset(train_dataset: Dataset) -> PreTrainedTokenizerFas
     return tokenizer
 
 
-if __name__ == "__main__":
+def main():
     dataset = prepare_cnn_dailymail_dataset()
     tokenizer = train_tokenizer_on_dataset(dataset["train"])
     tokenizer.save_pretrained(TOKENIZER_DIR)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,8 @@
 from pathlib import Path
 
 
-ROOT = Path().resolve()
-TOKENIZER_DIR = str(ROOT / "src" / "trained_tokenizer")
+ROOT_DIR = Path().resolve()
+TOKENIZER_DIR = ROOT_DIR / "src" / "trained_tokenizer"
 
 UNK_TOKEN = "[UNK]"
 PAD_TOKEN = "[PAD]"

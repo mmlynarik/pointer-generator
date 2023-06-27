@@ -2,7 +2,16 @@ from tokenizers import models, normalizers, pre_tokenizers, trainers, Tokenizer
 from datasets import load_dataset, Dataset
 from transformers import PreTrainedTokenizerFast
 
-from config import UNK_TOKEN, SPECIAL_TOKENS, TOKENIZER_DIR, PAD_TOKEN, START_TOKEN, END_TOKEN
+from config import (
+    UNK_TOKEN,
+    SPECIAL_TOKENS,
+    TOKENIZER_DIR,
+    PAD_TOKEN,
+    START_TOKEN,
+    END_TOKEN,
+    VOCAB_SIZE,
+    MODEL_MAX_LENGTH,
+)
 
 
 def add_tokenizer_training_string(batch: dict) -> dict:
@@ -26,7 +35,7 @@ def train_tokenizer_on_dataset(train_dataset: Dataset) -> PreTrainedTokenizerFas
     ]
     normalizer = normalizers.Sequence(normalizers_list)
     pre_tokenizer = pre_tokenizers.Whitespace()
-    trainer = trainers.WordLevelTrainer(vocab_size=50000, special_tokens=SPECIAL_TOKENS)
+    trainer = trainers.WordLevelTrainer(vocab_size=VOCAB_SIZE, special_tokens=SPECIAL_TOKENS)
 
     tokenizer = Tokenizer(model=models.WordLevel(unk_token=UNK_TOKEN))
     tokenizer.normalizer = normalizer
@@ -34,7 +43,7 @@ def train_tokenizer_on_dataset(train_dataset: Dataset) -> PreTrainedTokenizerFas
     tokenizer.train_from_iterator(train_dataset["tokenizer_training_string"], trainer=trainer)
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
-        model_max_length=1000,
+        model_max_length=MODEL_MAX_LENGTH,
         padding_side="right",
         truncation_side="right",
         pad_token=PAD_TOKEN,

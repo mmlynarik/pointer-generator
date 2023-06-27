@@ -3,7 +3,7 @@ from torch import nn
 from lightning.pytorch import LightningModule
 
 
-class PointerGeneratorModel(nn.Module):
+class PointerGeneratorSummarizatonModel(nn.Module):
     def __init__(
         # fmt: off
         self,
@@ -64,7 +64,7 @@ class AbstractiveSummarizationModel(LightningModule):
     It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and HuggingFace-based objects.
     """
 
-    def __init__(self, model: PointerGeneratorModel, lr: float = 0.15):
+    def __init__(self, model: PointerGeneratorSummarizatonModel, lr: float = 0.15):
         self.lr = lr                            # learning rate
 
     # inputs

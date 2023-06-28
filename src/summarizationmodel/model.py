@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from lightning.pytorch import LightningModule
 
+from config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
+
 
 class PointerGeneratorSummarizatonModel(nn.Module):
     def __init__(
@@ -10,8 +12,8 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         hidden_dim: int = 256,                  # dimension of LSTM hidden states
         embedding_dim: int = 128,               # dimension of word embedding
         batch_size: int = 16,                   # minibatch size
-        max_enc_steps: int = 400,               # max timesteps of encoder (max source text tokens)
-        max_dec_steps: int = 100,               # max timesteps of decoder (max summary tokens)
+        max_enc_steps: int = MAX_ENCODER_STEPS, # max timesteps of encoder (max source text tokens)
+        max_dec_steps: int = MAX_DECODER_STEPS, # max timesteps of decoder (max summary tokens)
         beam_size: int = 4,                     # beam size for beam search decoding.
         min_dec_steps: int = 35,                # Minimum seq length of generated summary. For decoding mode
         vocab_size: int = 50000,                # Maximum size of vocabulary

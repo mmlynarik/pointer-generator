@@ -2,7 +2,7 @@ from pathlib import Path
 
 from tokenizers import models, normalizers, pre_tokenizers, trainers, Tokenizer
 from datasets import load_dataset, Dataset
-from transformers import PreTrainedTokenizerFast, AutoTokenizer, BatchEncoding
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from config import (
     UNK_TOKEN,

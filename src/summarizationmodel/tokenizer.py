@@ -3,7 +3,9 @@ from typing import Callable, Sequence, Union
 
 from tokenizers import processors
 
-from transformers import PreTrainedTokenizerFast, AutoTokenizer, BatchEncoding
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from transformers.tokenization_utils_base import BatchEncoding
 
 from src.config import (
     TOKENIZER_DIR,
@@ -22,6 +24,7 @@ TEXT = Union[str, Sequence[str]]
 def add_start_or_end_token_postprocessor(
     tokenizer: PreTrainedTokenizerFast, token: START_OR_END_TOKEN
 ) -> PreTrainedTokenizerFast:
+    """Append a post-processor to existing tokenizer, adding either [START] or [END] special token."""
     special_token = (token, tokenizer.convert_tokens_to_ids(token))
     template = f"{token}:0 $A:0" if token == START_TOKEN else f"$A:0 {token}:0"
     post_processor = processors.TemplateProcessing(single=template, special_tokens=[special_token])
@@ -30,13 +33,13 @@ def add_start_or_end_token_postprocessor(
 
 
 def get_truncation_checker(tokenizer_dir: Path, max_length: int) -> TruncationChecker:
-    """Truncation checker used to decide which tokenizer to use for decoder targets."""
+    """Truncation checker used to decide which tokenizer will be used for decoder targets."""
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir)
     tokenizer = add_start_or_end_token_postprocessor(tokenizer, START_TOKEN)
 
     def truncation_checker(text: str) -> bool:
         inputs = tokenizer(text, truncation=True, max_length=max_length, return_overflowing_tokens=True)
-        return len(inputs.input_ids) > 1
+        return len(inputs["input_ids"]) > 1
 
     return truncation_checker
 
@@ -76,7 +79,7 @@ def get_target_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunct
     truncation_checker = get_truncation_checker(tokenizer_dir, max_length)
     encoder_tokenizer = get_encoder_tokenizer(tokenizer_dir, max_length)
 
-    def target_tokenizer(text: TEXT) -> BatchEncoding:
+    def target_tokenizer(text: TEXT) -> list[BatchEncoding]:
         texts = [text] if isinstance(text, str) else text
         tokenized_texts = []
         for text in texts:
@@ -100,7 +103,7 @@ def get_target_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunct
 def main():
     encoder_tokenizer = get_encoder_tokenizer(TOKENIZER_DIR, MAX_ENCODER_STEPS)
     decoder_tokenizer = get_decoder_tokenizer(TOKENIZER_DIR, MAX_DECODER_STEPS)
-    target_tokenizer = get_target_tokenizer(TOKENIZER_DIR, 8)
+    target_tokenizer = get_target_tokenizer(TOKENIZER_DIR, MAX_DECODER_STEPS)
 
     text = "I want you now. Yeah!"
     text_2 = text + "You want me?"

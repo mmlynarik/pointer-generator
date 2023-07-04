@@ -42,11 +42,11 @@ def train_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):
     tokenizer.normalizer = normalizer
     tokenizer.pre_tokenizer = pre_tokenizer
     tokenizer.train_from_iterator(train_dataset["tokenizer_training_string"], trainer=trainer)
+    tokenizer.enable_padding(pad_id=tokenizer.token_to_id(PAD_TOKEN), pad_token=PAD_TOKEN, length=None)
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
-        model_max_length=None,
-        padding_side="right",
-        truncation_side="right",
+        model_input_names=["input_ids", "attention_mask"],
+        model_max_length=1024,
         pad_token=PAD_TOKEN,
         unk_token=UNK_TOKEN,
         bos_token=START_TOKEN,

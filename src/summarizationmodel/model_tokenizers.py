@@ -4,6 +4,9 @@ from typing import Callable, Sequence, Union
 from tokenizers import processors
 
 from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
+from transformers.models.t5.tokenization_t5_fast import T5TokenizerFast
+from transformers.models.t5.configuration_t5 import T5Config
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers.tokenization_utils_base import BatchEncoding
 
@@ -49,9 +52,7 @@ def get_encoder_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunc
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir)
 
     def encoder_tokenizer(text: TEXT) -> BatchEncoding:
-        return tokenizer(
-            text, truncation=True, padding=True, max_length=max_length, return_token_type_ids=False
-        )
+        return tokenizer(text, truncation=True, padding=True, max_length=max_length)
 
     return encoder_tokenizer
 
@@ -62,9 +63,7 @@ def get_decoder_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunc
     tokenizer = add_start_or_end_token_postprocessor(tokenizer, START_TOKEN)
 
     def decoder_tokenizer(text: TEXT) -> BatchEncoding:
-        return tokenizer(
-            text, truncation=True, padding=True, max_length=max_length, return_token_type_ids=False
-        )
+        return tokenizer(text, truncation=True, padding=True, max_length=max_length)
 
     return decoder_tokenizer
 
@@ -86,15 +85,7 @@ def get_target_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunct
             if truncation_checker(text):
                 tokenized_texts.append(encoder_tokenizer(text))
             else:
-                tokenized_texts.append(
-                    tokenizer(
-                        text,
-                        truncation=True,
-                        padding=True,
-                        max_length=max_length,
-                        return_token_type_ids=False,
-                    )
-                )
+                tokenized_texts.append(tokenizer(text, truncation=True, padding=True, max_length=max_length))
         return tokenized_texts
 
     return target_tokenizer
@@ -103,14 +94,25 @@ def get_target_tokenizer(tokenizer_dir: Path, max_length: int) -> TokenizerFunct
 def main():
     encoder_tokenizer = get_encoder_tokenizer(TOKENIZER_DIR, MAX_ENCODER_STEPS)
     decoder_tokenizer = get_decoder_tokenizer(TOKENIZER_DIR, MAX_DECODER_STEPS)
-    target_tokenizer = get_target_tokenizer(TOKENIZER_DIR, MAX_DECODER_STEPS)
+    target_tokenizer = get_target_tokenizer(TOKENIZER_DIR, 8)
 
     text = "I want you now. Yeah!"
     text_2 = text + "You want me?"
     text_2 = [text, text_2]
     print(encoder_tokenizer(text_2).data)
-    print(decoder_tokenizer(text_2).encodings)
-    print(target_tokenizer(text_2)[0].encodings)
+    print(decoder_tokenizer(text_2).data)
+    print(target_tokenizer(text_2))
+
+    # t5_small_moddel = T5ForConditionalGeneration.from_pretrained("t5-small")
+    # t5_small_tokenizer: T5TokenizerFast = T5TokenizerFast.from_pretrained("t5-small")
+    # t5_config = T5Config.from_pretrained("t5-small")
+
+    # print(t5_small_tokenizer.pad_token_id, t5_small_tokenizer.pad_token)
+    # print(t5_small_tokenizer.unk_token_id, t5_small_tokenizer.unk_token)
+    # print(t5_small_tokenizer.eos_token_id, t5_small_tokenizer.eos_token)
+    # print(t5_small_tokenizer(text, truncation=True, max_length=6))
+    # print(t5_small_tokenizer.model_input_names)
+    # print(t5_config.decoder_start_token_id)
 
 
 if __name__ == "__main__":

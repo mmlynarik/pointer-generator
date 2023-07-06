@@ -13,7 +13,6 @@ from src.summarization.config import (
     END_TOKEN,
     VOCAB_SIZE,
 )
-from src.summarization.datamodule.tokenizer import SummarizationTokenizerFast
 
 
 def add_tokenizer_training_string(batch: dict) -> dict:

@@ -2,10 +2,6 @@ from typing import Callable, Sequence, Union
 from copy import deepcopy
 
 from tokenizers import Tokenizer, processors
-from transformers.models.auto.tokenization_auto import AutoTokenizer
-from transformers.models.t5.configuration_t5 import T5Config
-from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
-from transformers.models.t5.tokenization_t5_fast import T5TokenizerFast
 from transformers.tokenization_utils_base import BatchEncoding
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
@@ -52,15 +48,15 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
 
     @classmethod
     def from_pretrained(cls, tokenizer_dir: str):
-        base_tokenizer: PreTrainedTokenizerFast = PreTrainedTokenizerFast.from_pretrained(tokenizer_dir)
+        pretrained_tokenizer: PreTrainedTokenizerFast = PreTrainedTokenizerFast.from_pretrained(tokenizer_dir)
         return cls(
-            tokenizer_object=base_tokenizer.backend_tokenizer,
-            model_input_names=base_tokenizer.model_input_names,
-            model_max_length=base_tokenizer.model_max_length,
-            pad_token=base_tokenizer.pad_token,
-            unk_token=base_tokenizer.unk_token,
-            bos_token=base_tokenizer.bos_token,
-            eos_token=base_tokenizer.eos_token,
+            tokenizer_object=pretrained_tokenizer.backend_tokenizer,
+            model_input_names=pretrained_tokenizer.model_input_names,
+            model_max_length=pretrained_tokenizer.model_max_length,
+            pad_token=pretrained_tokenizer.pad_token,
+            unk_token=pretrained_tokenizer.unk_token,
+            bos_token=pretrained_tokenizer.bos_token,
+            eos_token=pretrained_tokenizer.eos_token,
         )
 
     def _apply_special_token_postprocessor(self, token: START_OR_END_TOKEN) -> "SummarizationTokenizerFast":
@@ -88,34 +84,34 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
 
         return truncation_checker
 
-    def generate_encoder_inputs(self, text: TEXT) -> list[BatchEncoding]:
+    def generate_encoder_inputs(self, batch: TEXT) -> list[BatchEncoding]:
         """Run __call__ method as an encoder tokenizer without adding any special tokens."""
         self._apply_empty_postprocessor()
-        return self(text, truncation=True, max_length=self.max_encoder_steps)
+        return self(batch, truncation=True, max_length=self.max_encoder_steps)
 
-    def generate_decoder_inputs(self, text: TEXT) -> list[BatchEncoding]:
+    def generate_decoder_inputs(self, batch: TEXT) -> list[BatchEncoding]:
         """Run __call__ method as a decoder inputs tokenizer. Always adds START_TOKEN."""
         self._apply_special_token_postprocessor(START_TOKEN)
-        return self(text, truncation=True, max_length=self.max_decoder_steps)
+        return self(batch, truncation=True, max_length=self.max_decoder_steps)
 
-    def generate_decoder_targets(self, text: TEXT) -> list[BatchEncoding]:
+    def generate_decoder_targets(self, batch: TEXT) -> list[BatchEncoding]:
         """
         Run __call__ method as a decoder targets tokenizer. Adds END_TOKEN only if decoder input has not been truncated.
         """
-        tokenizer_wo_special_token = deepcopy(self._apply_empty_postprocessor())
-        tokenizer_w_special_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
+        tokenizer_without_special_token = deepcopy(self._apply_empty_postprocessor())
+        tokenizer_with_special_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
         truncation_checker = self.get_truncation_checker()
 
-        texts = [text] if isinstance(text, str) else text
+        batch = [batch] if isinstance(batch, str) else batch
         tokenized_texts = []
-        for text in texts:
+        for text in batch:
             if truncation_checker(text):
                 tokenized_texts.append(
-                    tokenizer_wo_special_token(text, max_length=self.max_decoder_steps, truncation=True)
+                    tokenizer_without_special_token(text, max_length=self.max_decoder_steps, truncation=True)
                 )
             else:
                 tokenized_texts.append(
-                    tokenizer_w_special_token(text)
+                    tokenizer_with_special_token(text)
                 )
         return tokenized_texts
 
@@ -130,18 +126,6 @@ def main():
     print(tokenizer.generate_encoder_inputs(texts))
     print(tokenizer.generate_decoder_targets(texts))
     print(tokenizer.generate_decoder_inputs(texts))
-
-    # print(target_tokenizer(text_2))
-
-    # model: T5ForConditionalGeneration = T5ForConditionalGeneration.from_pretrained("t5-small")
-    # tokenizer: T5TokenizerFast = T5TokenizerFast.from_pretrained("t5-small")
-
-    # inputs = tokenizer(texts, padding=True, truncation=True, max_length=10, return_tensors="pt")
-    # labels = inputs["input_ids"]
-    # decoder_input_ids = model.prepare_decoder_input_ids_from_labels(labels)
-    # tokenizer.model_max_length
-    # print(labels)
-    # print(decoder_input_ids)
 
 
 if __name__ == "__main__":

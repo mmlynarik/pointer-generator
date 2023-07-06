@@ -19,8 +19,9 @@
 import tensorflow as tf
 import numpy as np
 import data
-
+from model import SummarizationModel
 FLAGS = tf.app.flags.FLAGS
+
 
 class Hypothesis(object):
   """Class to represent a hypothesis during beam search. Holds all the information needed for the hypothesis."""
@@ -78,7 +79,7 @@ class Hypothesis(object):
     return self.log_prob / len(self.tokens)
 
 
-def run_beam_search(sess, model, vocab, batch):
+def run_beam_search(sess, model: SummarizationModel, vocab, batch):
   """Performs beam search decoding on the given example.
 
   Args:

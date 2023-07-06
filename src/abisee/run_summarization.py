@@ -91,10 +91,10 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
     else:
         running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
     running_avg_loss = min(running_avg_loss, 12)  # clip
-    loss_sum = tf.Summary()
+    loss_smry = tf.Summary()
     tag_name = 'running_avg_loss/decay=%f' % (decay)
-    loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
-    summary_writer.add_summary(loss_sum, step)
+    loss_smry.value.add(tag=tag_name, simple_value=running_avg_loss)
+    summary_writer.add_summary(loss_smry, step)
     tf.logging.info('running_avg_loss: %f', running_avg_loss)
     return running_avg_loss
 
@@ -148,7 +148,7 @@ def convert_to_coverage_model():
     exit()
 
 
-def setup_training(model, batcher):
+def setup_training(model: SummarizationModel, batcher):
     """Does setup before starting training (run_training)"""
     train_dir = os.path.join(FLAGS.log_root, "train")
     if not os.path.exists(train_dir):
@@ -217,15 +217,15 @@ def run_training(model: SummarizationModel, batcher: Batcher, sess_context_manag
                 summary_writer.flush()
 
 
-def run_eval(model, batcher, vocab):
+def run_eval(model: SummarizationModel, batcher: Batcher, vocab: Vocab):
     """Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far."""
     model.build_graph()  # build the graph
     saver = tf.train.Saver(max_to_keep=3)  # we will keep 3 best checkpoints at a time
     sess = tf.Session(config=util.get_config())
     eval_dir = os.path.join(FLAGS.log_root, "eval")  # make a subdir of the root dir for eval data
-    bestmodel_save_path = os.path.join(eval_dir, 'bestmodel')  # this is where checkpoints of best models are saved
+    bestmodel_save_path = os.path.join(eval_dir, 'bestmodel')  # where checkpoints of best models are saved
     summary_writer = tf.summary.FileWriter(eval_dir)
-    running_avg_loss = 0  # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+    running_avg_loss = 0  # eval job uses smoother, running avg loss, to tell it when to apply early stopping
     best_loss = None  # will hold the best loss achieved so far
 
     while True:

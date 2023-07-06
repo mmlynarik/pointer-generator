@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 ROOT_DIR = Path().resolve()
-TOKENIZER_DIR = ROOT_DIR / "src" / "trained_tokenizer"
+TOKENIZER_DIR = ROOT_DIR / "src" / "summarization" / "trained_tokenizer"
 
 UNK_TOKEN = "[UNK]"
 PAD_TOKEN = "[PAD]"

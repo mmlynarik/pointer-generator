@@ -18,14 +18,16 @@
 
 import os
 import time
+import json
+import logging
+
 import tensorflow as tf
+import rouge
+import numpy as np
+
 import beam_search
 import data
-import json
-import pyrouge
 import util
-import logging
-import numpy as np
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -207,7 +209,7 @@ def make_html_safe(s):
 
 def rouge_eval(ref_dir, dec_dir):
   """Evaluate the files in ref_dir and dec_dir with pyrouge, returning results_dict"""
-  r = pyrouge.Rouge155()
+  r = rouge.Rouge155()
   r.model_filename_pattern = '#ID#_reference.txt'
   r.system_filename_pattern = '(\d+)_decoded.txt'
   r.model_dir = ref_dir

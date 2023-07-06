@@ -4,7 +4,7 @@ from tokenizers import models, normalizers, pre_tokenizers, trainers, Tokenizer
 from datasets import load_dataset, Dataset
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
-from config import (
+from src.summarization.config import (
     UNK_TOKEN,
     SPECIAL_TOKENS,
     TOKENIZER_DIR,
@@ -13,6 +13,7 @@ from config import (
     END_TOKEN,
     VOCAB_SIZE,
 )
+from src.summarization.datamodule.tokenizer import SummarizationTokenizerFast
 
 
 def add_tokenizer_training_string(batch: dict) -> dict:
@@ -26,7 +27,7 @@ def prepare_cnn_dailymail_dataset() -> Dataset:
     return dataset
 
 
-def train_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):
+def train_base_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):
     """Train lowercased word-level tokenizer on training dataset splitting on whitespace and puctuation."""
     normalizers_list = [
         normalizers.NFD(),
@@ -57,7 +58,7 @@ def train_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):
 
 def main():
     dataset = prepare_cnn_dailymail_dataset()
-    train_tokenizer_on_dataset(dataset["train"], TOKENIZER_DIR)
+    train_base_tokenizer_on_dataset(dataset["train"], TOKENIZER_DIR)
 
 
 if __name__ == "__main__":

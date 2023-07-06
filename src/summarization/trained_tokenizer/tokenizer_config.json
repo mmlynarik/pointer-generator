@@ -4,7 +4,8 @@
   "eos_token": "[STOP]",
   "model_input_names": [
     "input_ids",
-    "attention_mask"
+    "attention_mask",
+    "aj toto tu chcem este"
   ],
   "model_max_length": 1024,
   "pad_token": "[PAD]",

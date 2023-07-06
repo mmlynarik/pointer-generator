@@ -2,8 +2,7 @@ from typing import Callable, Sequence, Union
 from copy import deepcopy
 
 from tokenizers import Tokenizer, processors
-from transformers.tokenization_utils_base import BatchEncoding
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizerFast, BatchEncoding
 
 from src.summarization.config import (
     END_TOKEN,
@@ -123,7 +122,7 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         return self._get_batch_encoding_from_list(encodings)
 
 
-def main():
+def test_tokenizer():
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
 
     text = "Here is a short article."
@@ -133,6 +132,10 @@ def main():
     print(tokenizer.generate_encoder_inputs(batch))
     print(tokenizer.generate_decoder_targets(batch))
     print(tokenizer.generate_decoder_inputs(batch))
+
+
+def main():
+    test_tokenizer()
 
 
 if __name__ == "__main__":

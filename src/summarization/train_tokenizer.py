@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from tokenizers import models, normalizers, pre_tokenizers, trainers, Tokenizer
-from datasets import load_dataset, Dataset
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from datasets import Dataset
+from transformers import PreTrainedTokenizerFast
 
+from src.summarization.datamodule.dataset import prepare_cnn_dailymail_dataset
 from src.summarization.config import (
     UNK_TOKEN,
     SPECIAL_TOKENS,
@@ -13,17 +14,6 @@ from src.summarization.config import (
     END_TOKEN,
     VOCAB_SIZE,
 )
-
-
-def add_tokenizer_training_string(batch: dict) -> dict:
-    return {"tokenizer_training_string": batch["article"] + " " + batch["highlights"]}
-
-
-def prepare_cnn_dailymail_dataset() -> Dataset:
-    """Loads cnn_dailymail dataset and adds to train split tokenizer training string."""
-    dataset = load_dataset("cnn_dailymail", name="3.0.0")
-    dataset["train"] = dataset["train"].map(add_tokenizer_training_string)
-    return dataset
 
 
 def train_base_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):

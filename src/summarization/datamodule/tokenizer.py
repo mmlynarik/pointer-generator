@@ -72,7 +72,7 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         self.backend_tokenizer.post_processor = processors.TemplateProcessing()
         return self
 
-    def get_truncation_checker(self) -> TruncationChecker:
+    def _get_truncation_checker(self) -> TruncationChecker:
         """
         Truncation checker is used to decide how decoder targets will be encoded. Truncation will be applied if tokens (with added special start token) exceed batch max_decoder_steps.
         """
@@ -83,6 +83,15 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
             return len(tokens) > self.max_decoder_steps
 
         return truncation_checker
+
+    def _get_batch_encoding_from_list(self, encodings: list[BatchEncoding]) -> BatchEncoding:
+        return BatchEncoding(
+            data={
+                "input_ids": [item["input_ids"] for item in encodings],
+                "attention_mask": [item["attention_mask"] for item in encodings],
+            },
+            encoding=encodings,
+        )
 
     def generate_encoder_inputs(self, batch: TEXT) -> list[BatchEncoding]:
         """Run __call__ method as an encoder tokenizer without adding any special tokens."""
@@ -100,20 +109,18 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         """
         tokenizer_without_special_token = deepcopy(self._apply_empty_postprocessor())
         tokenizer_with_special_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
-        truncation_checker = self.get_truncation_checker()
+        truncation_checker = self._get_truncation_checker()
 
         batch = [batch] if isinstance(batch, str) else batch
-        tokenized_texts = []
+        encodings: list[BatchEncoding] = []
         for text in batch:
             if truncation_checker(text):
-                tokenized_texts.append(
+                encodings.append(
                     tokenizer_without_special_token(text, max_length=self.max_decoder_steps, truncation=True)
                 )
             else:
-                tokenized_texts.append(
-                    tokenizer_with_special_token(text)
-                )
-        return tokenized_texts
+                encodings.append(tokenizer_with_special_token(text))
+        return self._get_batch_encoding_from_list(encodings)
 
 
 def main():

@@ -128,11 +128,11 @@ def main():
 
     text = "Here is a short article."
     text_2 = "Here is a long article, which exceeds model max length."
-    texts = [text, text_2]
+    batch = [text, text_2]
 
-    print(tokenizer.generate_encoder_inputs(texts))
-    print(tokenizer.generate_decoder_targets(texts))
-    print(tokenizer.generate_decoder_inputs(texts))
+    print(tokenizer.generate_encoder_inputs(batch))
+    print(tokenizer.generate_decoder_targets(batch))
+    print(tokenizer.generate_decoder_inputs(batch))
 
 
 if __name__ == "__main__":

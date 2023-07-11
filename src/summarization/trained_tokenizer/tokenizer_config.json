@@ -4,10 +4,9 @@
   "eos_token": "[STOP]",
   "model_input_names": [
     "input_ids",
-    "attention_mask",
-    "aj toto tu chcem este"
+    "attention_mask"
   ],
-  "model_max_length": 1024,
+  "model_max_length": 2048,
   "pad_token": "[PAD]",
   "tokenizer_class": "PreTrainedTokenizerFast",
   "unk_token": "[UNK]"

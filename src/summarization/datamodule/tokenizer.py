@@ -1,10 +1,13 @@
 from typing import Callable, Sequence, Union
 from copy import deepcopy
+from dataclasses import dataclass
 
+import torch
+from datasets import Dataset
 from tokenizers import Tokenizer, processors
 from transformers import PreTrainedTokenizerFast, BatchEncoding
 
-from src.summarization.config import (
+from summarization.config import (
     END_TOKEN,
     MAX_DECODER_STEPS,
     MAX_ENCODER_STEPS,
@@ -92,19 +95,23 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
             encoding=encodings,
         )
 
-    def generate_encoder_inputs(self, batch: TEXT) -> list[BatchEncoding]:
-        """Run __call__ method as an encoder tokenizer without adding any special tokens."""
+    def generate_encoder_inputs(self, batch: TEXT) -> BatchEncoding:
+        """
+        Run __call__ method as an encoder tokenizer without adding any special tokens. Final step applies only truncation. Padding is deferred to collator function.
+        """
         self._apply_empty_postprocessor()
         return self(batch, truncation=True, max_length=self.max_encoder_steps)
 
-    def generate_decoder_inputs(self, batch: TEXT) -> list[BatchEncoding]:
-        """Run __call__ method as a decoder inputs tokenizer. Always adds START_TOKEN."""
+    def generate_decoder_inputs(self, batch: TEXT) -> BatchEncoding:
+        """
+        Run __call__ method as a decoder inputs tokenizer. Always adds START_TOKEN. Final step applies only truncation. Padding is deferred to collator function.
+        """
         self._apply_special_token_postprocessor(START_TOKEN)
         return self(batch, truncation=True, max_length=self.max_decoder_steps)
 
-    def generate_decoder_targets(self, batch: TEXT) -> list[BatchEncoding]:
+    def generate_decoder_targets(self, batch: TEXT) -> BatchEncoding:
         """
-        Run __call__ method as a decoder targets tokenizer. Adds END_TOKEN only if decoder input has not been truncated.
+        Run __call__ method as a decoder targets tokenizer. Adds END_TOKEN only if decoder input has not been truncated. Final step applies only truncation. Padding is deferred to collator function.
         """
         tokenizer_without_special_token = deepcopy(self._apply_empty_postprocessor())
         tokenizer_with_special_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
@@ -121,17 +128,46 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
                 encodings.append(tokenizer_with_special_token(text))
         return self._get_batch_encoding_from_list(encodings)
 
+    def prepare_model_inputs(self, batch: dict) -> dict:
+        articles, abstracts = batch["article"], batch["highlights"]
+
+        encoding = SummarizationBatchEncoding(
+            encoder_inputs=self.generate_encoder_inputs(articles),
+            decoder_inputs=self.generate_decoder_inputs(abstracts),
+            decoder_targets=self.generate_decoder_targets(abstracts),
+        )
+        return {**encoding.get_encoder_features(), **encoding.get_decoder_features()}
+
+
+@dataclass
+class SummarizationBatchEncoding:
+    encoder_inputs: BatchEncoding
+    decoder_inputs: BatchEncoding
+    decoder_targets: BatchEncoding
+
+    def get_encoder_features(self) -> dict:
+        return {
+            "encoder_input_ids": self.encoder_inputs["input_ids"],
+            "encoder_padding_mask": self.encoder_inputs["attention_mask"],
+        }
+
+    def get_decoder_features(self) -> dict:
+        return {
+            "decorer_input_ids": self.decoder_inputs["input_ids"],
+            "decoder_padding_mask": self.decoder_targets["attention_mask"],
+            "decoder_target_ids": self.decoder_targets["input_ids"],
+        }
+
 
 def test_tokenizer():
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
 
     text = "Here is a short article."
     text_2 = "Here is a long article, which exceeds model max length."
-    batch = [text, text_2]
+    batch = {"article": [text, text_2], "highlights": [text, text_2]}
 
-    print(tokenizer.generate_encoder_inputs(batch))
-    print(tokenizer.generate_decoder_targets(batch))
-    print(tokenizer.generate_decoder_inputs(batch))
+    features = tokenizer.prepare_model_inputs(batch)
+    print(features)
 
 
 def main():

@@ -1,16 +1,18 @@
-from typing import Callable, Sequence, Union
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Callable, Sequence, Union
 
 import torch
 from datasets import Dataset
 from tokenizers import Tokenizer, processors
-from transformers import PreTrainedTokenizerFast, BatchEncoding
+from transformers import BatchEncoding, PreTrainedTokenizerFast
 
 from summarizationmodel.config import (
     END_TOKEN,
     MAX_DECODER_STEPS,
     MAX_ENCODER_STEPS,
+    NON_PADDABLE_FEATURES,
+    PADDABLE_FEATURES,
     START_TOKEN,
     TOKENIZER_DIR,
 )
@@ -35,6 +37,8 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         eos_token: str,
         max_encoder_steps: int = MAX_ENCODER_STEPS,
         max_decoder_steps: int = MAX_DECODER_STEPS,
+        paddable_features: list[str] = PADDABLE_FEATURES,
+        non_paddable_features: list[str] = NON_PADDABLE_FEATURES,
     ):
         super().__init__(
             tokenizer_object=tokenizer_object,
@@ -47,6 +51,8 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         )
         self.max_encoder_steps = max_encoder_steps
         self.max_decoder_steps = max_decoder_steps
+        self.paddable_features = paddable_features
+        self.non_paddable_features = non_paddable_features
 
     @classmethod
     def from_pretrained(cls, tokenizer_dir: str):

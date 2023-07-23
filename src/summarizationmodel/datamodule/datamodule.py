@@ -1,16 +1,15 @@
 import logging
-from typing import Optional
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 import torch
-from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
-from lightning import LightningDataModule
-from torch.utils.data import DataLoader
-from transformers import PreTrainedTokenizerFast
 from datasets import load_from_disk
+from lightning import LightningDataModule
+from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
+from torch.utils.data import DataLoader
 
-from summarizationmodel.config import TOKENIZER_DIR, DATA_DIR
+from summarizationmodel.config import DATA_DIR, TOKENIZER_DIR
 from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
 from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
 
@@ -20,33 +19,26 @@ log.addHandler(logging.NullHandler())
 
 @dataclass
 class SummarizationDataCollator:
-    tokenizer: PreTrainedTokenizerFast
+    tokenizer: SummarizationTokenizerFast
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
 
-    def pad_one_feature(self, features: dict[str, list], name: str) -> dict[str, list]:
-        items = [feature[name] for feature in features]
+    def pad_one_feature(self, batch: dict[str, list], name: str) -> dict[str, list]:
+        items = [example[name] for example in batch]
         max_length = max(len(i) for i in items)
-        for feature in features:
-            feature[name] = torch.tensor(
-                feature[name] + [self.tokenizer.pad_token_id] * (max_length - len(feature[name])),
+        for example in batch:
+            example[name] = torch.tensor(
+                example[name] + [self.tokenizer.pad_token_id] * (max_length - len(example[name])),
                 dtype=torch.int32,
             )
 
-        return features
+        return batch
 
-    def __call__(self, features):
-        for feature in [
-            "encoder_input_ids",
-            "encoder_padding_mask",
-            "decoder_input_ids",
-            "decoder_padding_mask",
-            "decoder_target_ids",
-            "encoder_inputs_extvoc",
-        ]:
-            features = self.pad_one_feature(features, feature)
+    def __call__(self, batch):
+        for feature_name in self.tokenizer.paddable_features:
+            batch = self.pad_one_feature(batch, feature_name)
 
-        return features
+        return batch
 
 
 class SummarizationDataModule(LightningDataModule):
@@ -96,14 +88,10 @@ class SummarizationDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(
-            self.val_dataset, batch_size=self.batch_size, collate_fn=self.data_collator
-        )
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, collate_fn=self.data_collator)
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(
-            self.test_dataset, batch_size=self.batch_size, collate_fn=self.data_collator
-        )
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, collate_fn=self.data_collator)
 
 
 if __name__ == "__main__":

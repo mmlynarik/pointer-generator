@@ -91,6 +91,7 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
             data={
                 "input_ids": [item["input_ids"] for item in encodings],
                 "attention_mask": [item["attention_mask"] for item in encodings],
+                "oovs": [item["oovs"] for item in encodings] if "oovs" in encodings[0] else [],
             },
             encoding=encodings,
         )
@@ -109,34 +110,78 @@ class SummarizationTokenizerFast(PreTrainedTokenizerFast):
         self._apply_special_token_postprocessor(START_TOKEN)
         return self(batch, truncation=True, max_length=self.max_decoder_steps)
 
-    def generate_decoder_targets(self, batch: TEXT) -> BatchEncoding:
+    def generate_decoder_targets(self, batch: TEXT, oovs: list[list[str]]) -> BatchEncoding:
         """
         Run __call__ method as a decoder targets tokenizer. Adds END_TOKEN only if decoder input has not been truncated. Final step applies only truncation. Padding is deferred to collator function.
         """
-        tokenizer_without_special_token = deepcopy(self._apply_empty_postprocessor())
-        tokenizer_with_special_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
-        truncation_checker = self._get_truncation_checker()
+        tokenizer_wo_special_token = deepcopy(self._apply_empty_postprocessor())
+        tokenizer_with_end_token = deepcopy(self._apply_special_token_postprocessor(END_TOKEN))
+        truncation_checker = deepcopy(self._get_truncation_checker())
 
         batch = [batch] if isinstance(batch, str) else batch
         encodings: list[BatchEncoding] = []
+        for idx, text in enumerate(batch):
+            words = self.backend_tokenizer.pre_tokenizer.pre_tokenize_str(text)
+            words = words + [(END_TOKEN, ())] if len(words) < self.max_decoder_steps else words
+            encoding = (
+                tokenizer_wo_special_token(text, max_length=self.max_decoder_steps, truncation=True)
+                if truncation_checker(text)
+                else tokenizer_with_end_token(text)
+            )
+            input_ids = []
+            for input_id, (word, _) in zip(encoding.input_ids, words):
+                if input_id == self.unk_token_id:
+                    if word in oovs[idx]:
+                        input_ids.append(self.vocab_size + oovs[idx].index(word))
+                    else:
+                        input_ids.append(self.unk_token_id)
+                else:
+                    input_ids.append(input_id)
+
+            encoding.data["input_ids"] = input_ids
+            encodings.append(encoding)
+        return self._get_batch_encoding_from_list(encodings)
+
+    def generate_encoder_inputs_extend_vocab(self, batch: TEXT) -> BatchEncoding:
+        """
+        Run __call__ method as an extended-vocabulary encoder tokenizer considering OOV tokens per example without adding any special tokens. Final step applies only truncation. Padding is deferred to collator function.
+        """
+        self._apply_empty_postprocessor()
+        batch = [batch] if isinstance(batch, str) else batch
+        encodings: list[BatchEncoding] = []
         for text in batch:
-            if truncation_checker(text):
-                encodings.append(
-                    tokenizer_without_special_token(text, max_length=self.max_decoder_steps, truncation=True)
-                )
-            else:
-                encodings.append(tokenizer_with_special_token(text))
+            oovs, input_ids = [], []
+            encoding = self(text, truncation=True, max_length=self.max_encoder_steps)
+            words = self.backend_tokenizer.pre_tokenizer.pre_tokenize_str(text)
+            for input_id, (word, _) in zip(encoding.input_ids, words):
+                if input_id == self.unk_token_id:
+                    if word not in oovs:
+                        oovs.append(word)
+                    input_ids.append(self.vocab_size + oovs.index(word))
+                else:
+                    input_ids.append(input_id)
+
+            encoding.data["input_ids"], encoding.data["oovs"] = input_ids, oovs
+            encodings.append(encoding)
+
         return self._get_batch_encoding_from_list(encodings)
 
     def prepare_model_inputs(self, batch: dict) -> dict:
         articles, abstracts = batch["article"], batch["highlights"]
 
+        encoder_inputs = self.generate_encoder_inputs(articles)
+        decoder_inputs = self.generate_decoder_inputs(abstracts)
+        encoder_inputs_extend_vocab = self.generate_encoder_inputs_extend_vocab(articles)
+        decoder_targets = self.generate_decoder_targets(abstracts, encoder_inputs_extend_vocab["oovs"])
+
         encoding = SummarizationBatchEncoding(
-            encoder_inputs=self.generate_encoder_inputs(articles),
-            decoder_inputs=self.generate_decoder_inputs(abstracts),
-            decoder_targets=self.generate_decoder_targets(abstracts),
+            encoder_inputs, decoder_inputs, decoder_targets, encoder_inputs_extend_vocab
         )
-        return {**encoding.get_encoder_features(), **encoding.get_decoder_features()}
+        return {
+            **encoding.get_encoder_features(),
+            **encoding.get_decoder_features(),
+            **encoding.get_encoder_extvoc_features(),
+        }
 
 
 @dataclass
@@ -144,6 +189,7 @@ class SummarizationBatchEncoding:
     encoder_inputs: BatchEncoding
     decoder_inputs: BatchEncoding
     decoder_targets: BatchEncoding
+    encoder_inputs_extend_vocab: BatchEncoding
 
     def get_encoder_features(self) -> dict:
         return {
@@ -153,9 +199,15 @@ class SummarizationBatchEncoding:
 
     def get_decoder_features(self) -> dict:
         return {
-            "decorer_input_ids": self.decoder_inputs["input_ids"],
+            "decoder_input_ids": self.decoder_inputs["input_ids"],
             "decoder_padding_mask": self.decoder_targets["attention_mask"],
             "decoder_target_ids": self.decoder_targets["input_ids"],
+        }
+
+    def get_encoder_extvoc_features(self) -> dict:
+        return {
+            "encoder_inputs_extvoc": self.encoder_inputs_extend_vocab["input_ids"],
+            "oovs": self.encoder_inputs_extend_vocab["oovs"],
         }
 
 
@@ -163,10 +215,11 @@ def test_tokenizer():
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
 
     text = "Here is a short article."
-    text_2 = "Here is a long article, which exceeds model max length."
+    text_2 = "Here is a long article, which exceeds modddsdsdel madffdfx ldddength."
     batch = {"article": [text, text_2], "highlights": [text, text_2]}
 
     features = tokenizer.prepare_model_inputs(batch)
+    print(batch)
     print(features)
 
 

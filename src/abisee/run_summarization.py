@@ -21,11 +21,11 @@ import os
 import tensorflow as tf
 import numpy as np
 from collections import namedtuple
-from data import Vocab
-from batcher import Batcher
-from model import SummarizationModel
-from decode import BeamSearchDecoder
-import util
+from abisee.data import Vocab
+from abisee.batcher import Batcher
+from abisee.model import SummarizationModel
+from abisee.decode import BeamSearchDecoder
+import abisee.util as util
 from tensorflow.python import debug as tf_debug
 
 FLAGS = tf.app.flags.FLAGS

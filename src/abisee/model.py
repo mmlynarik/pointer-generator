@@ -23,9 +23,9 @@ import tensorflow as tf
 
 # from tensorflow.contrib.tensorboard.plugins import projector
 
-from attention_decoder import attention_decoder
-from batcher import Batch
-from data import Vocab
+from abisee.attention_decoder import attention_decoder
+from abisee.batcher import Batch
+from abisee.data import Vocab
 
 
 FLAGS = tf.app.flags.FLAGS

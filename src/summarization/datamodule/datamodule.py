@@ -27,7 +27,6 @@ class SummarizationDataCollator:
     def pad_one_feature(self, features: dict[str, list], name: str) -> dict[str, list]:
         items = [feature[name] for feature in features]
         max_length = max(len(i) for i in items)
-        print(f"{name=}, {max_length=}")
         for feature in features:
             feature[name] = torch.tensor(
                 feature[name] + [self.tokenizer.pad_token_id] * (max_length - len(feature[name])),
@@ -40,9 +39,10 @@ class SummarizationDataCollator:
         for feature in [
             "encoder_input_ids",
             "encoder_padding_mask",
-            "decorer_input_ids",
+            "decoder_input_ids",
             "decoder_padding_mask",
             "decoder_target_ids",
+            "encoder_inputs_extvoc",
         ]:
             features = self.pad_one_feature(features, feature)
 
@@ -73,6 +73,7 @@ class SummarizationDataModule(LightningDataModule):
         encoded_dataset = raw_dataset.map(
             self.tokenizer.prepare_model_inputs,
             batched=True,
+            batch_size=1000,
             remove_columns=["article", "highlights", "id"],
         )
         encoded_dataset["train"] = encoded_dataset["train"].remove_columns("tokenizer_training_string")
@@ -109,8 +110,8 @@ if __name__ == "__main__":
     dm = SummarizationDataModule()
     dm.prepare_data()
     dm.setup()
-    train_dataloader = dm.train_dataloader()
-    for step, batch in enumerate(train_dataloader):
+
+    for step, batch in enumerate(dm.train_dataloader()):
         if step == 0:
             print(batch[:1])
             break

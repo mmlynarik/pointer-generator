@@ -211,20 +211,16 @@ class SummarizationBatchEncoding:
         }
 
 
-def test_tokenizer():
+def main():
+    """Test tokenizer"""
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
 
     text = "Here is a short article."
     text_2 = "Here is a long article, which exceeds modddsdsdel madffdfx ldddength."
-    batch = {"article": [text, text_2], "highlights": [text, text_2]}
+    batch = {"article": [text, text_2], "highlights": [text, text_2 + " bbbbbb"]}
 
     features = tokenizer.prepare_model_inputs(batch)
-    print(batch)
-    print(features)
-
-
-def main():
-    test_tokenizer()
+    print(f"Input texts:\n{batch} \n\nModel inputs:\n{features}")
 
 
 if __name__ == "__main__":

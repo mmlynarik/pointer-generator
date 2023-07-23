@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from lightning.pytorch import LightningModule
 
-from src.summarization.config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
+from src.summarizationmodel.config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
 
 
 class PointerGeneratorSummarizatonModel(nn.Module):

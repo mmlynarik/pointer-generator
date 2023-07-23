@@ -10,9 +10,9 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 from datasets import load_from_disk
 
-from summarization.config import TOKENIZER_DIR, DATA_DIR
-from summarization.datamodule.dataset import load_cnn_dailymail_dataset
-from summarization.datamodule.tokenizer import SummarizationTokenizerFast
+from summarizationmodel.config import TOKENIZER_DIR, DATA_DIR
+from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
+from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())

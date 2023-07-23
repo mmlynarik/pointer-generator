@@ -7,7 +7,7 @@ from datasets import Dataset
 from tokenizers import Tokenizer, processors
 from transformers import PreTrainedTokenizerFast, BatchEncoding
 
-from summarization.config import (
+from summarizationmodel.config import (
     END_TOKEN,
     MAX_DECODER_STEPS,
     MAX_ENCODER_STEPS,

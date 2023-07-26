@@ -1,62 +1,112 @@
+from typing import Any
+from dataclasses import dataclass
+
 import torch
 from torch import nn
 from lightning.pytorch import LightningModule
-from torch.nn.utils.rnn import pack_sequence, PackedSequence, pad_packed_sequence, pack_padded_sequence
-from summarizationmodel.config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
+from torch.nn.utils.rnn import pack_sequence, PackedSequence
+
+from summarizationmodel.datamodule.datamodule import pack_sequences, SummarizationDataModule
+from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
+from summarizationmodel.config import (
+    END_TOKEN,
+    MAX_DECODER_STEPS,
+    MAX_ENCODER_STEPS,
+    NON_PADDABLE_FEATURES,
+    PADDABLE_FEATURES,
+    START_TOKEN,
+    TOKENIZER_DIR,
+)
+
+
+@dataclass
+class LSTMStateTuple:
+    """
+    LSTM encoder final state with both attributes of shape [batch_size, actual_hidden_dim].
+    Actual_hidden_dim = 2 * hidden_dim (for unreduced state) or hidden_dim (for reduced state).
+    """
+    hidden_state: torch.Tensor
+    cell_state: torch.Tensor
+
+
+class Embedding(nn.Module):
+    def __init__(self, embedding_dim: int, tokenizer: SummarizationTokenizerFast):
+        super().__init__()
+        vocab_size = tokenizer.backend_tokenizer.get_vocab_size()
+        pad_token_id = tokenizer.pad_token_id
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, pad_token_id)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.embedding(inputs)
+
+
+class PointerGeneratorEncoder(nn.Module):
+    """Single-layer bi-directional LSTM encoder.
+
+    Inputs: tensor of shape [batch_size, max_enc_steps, embedding_dim].
+    Outputs:
+        encoder_outputs of shape [batch_size, max_enc_steps, 2 * hidden_dim]
+        unreduced lstm_state with attributes of shape [batch_size, 2 * hidden_dim]
+    """
+    def __init__(self, hidden_dim: int, embedding_dim: int):
+        super().__init__()
+        self.encoder = nn.LSTM(
+            input_size=embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=1,
+            bidirectional=True,
+            batch_first=True,
+        )
+
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, LSTMStateTuple]:
+        encoder_outputs, (hidden_state, cell_state) = self.encoder(inputs)
+        hidden_state = torch.cat([direction for direction in hidden_state], axis=1).squeeze()
+        cell_state = torch.cat([direction for direction in cell_state], axis=1).squeeze()
+        lstm_state = LSTMStateTuple(hidden_state, cell_state)
+        return encoder_outputs, lstm_state
+
+
+class PointerGeneratorStateReducer(nn.Module):
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.linear_cell = nn.Linear(2 * hidden_dim, hidden_dim)
+        self.linear_hidden = nn.Linear(2 * hidden_dim, hidden_dim)
+
+    def forward(self, lstm_state: LSTMStateTuple) -> LSTMStateTuple:
+        reduced_hidden_state = self.linear_hidden(lstm_state.hidden_state)
+        reduced_cell_state = self.linear_cell(lstm_state.cell_state)
+        return LSTMStateTuple(reduced_hidden_state, reduced_cell_state)
 
 
 class PointerGeneratorSummarizatonModel(nn.Module):
     def __init__(
         # fmt: off
         self,
-        hidden_dim: int = 256,                  # dimension of LSTM hidden states
-        embedding_dim: int = 128,               # dimension of word embedding
-        batch_size: int = 16,                   # minibatch size
-        max_enc_steps: int = MAX_ENCODER_STEPS, # max timesteps of encoder (max source text tokens)
-        max_dec_steps: int = MAX_DECODER_STEPS, # max timesteps of decoder (max summary tokens)
-        beam_size: int = 4,                     # beam size for beam search decoding.
-        min_dec_steps: int = 35,                # Minimum seq length of generated summary. For decoding mode
-        vocab_size: int = 50000,                # Maximum size of vocabulary
+        hidden_dim: int,                        # dimension of LSTM hidden states
+        embedding_dim: int,                     # dimension of word embedding
+        batch_size: int,                        # minibatch size
+        max_enc_steps: int,                     # max timesteps of encoder (max source text tokens)
+        max_dec_steps: int,                     # max timesteps of decoder (max summary tokens)
+        beam_size: int,                         # beam size for beam search decoding.
+        min_dec_steps: int,                     # Minimum seq length of generated summary. For decoding mode
+        tokenizer: SummarizationTokenizerFast,  # tokenizer used to get vocab
         rand_unif_init_mag: float = 0.02,       # magnitude for LSTM cells random uniform inititalization
         trunc_norm_init_std: float = 1e-4,      # std of trunc norm initialization, used for everything else
         max_grad_norm: float = 2.0,
         # gradient clipping norm
         # fmt: on
     ):
-        self.hidden_dim = hidden_dim
-        self.embedding_dim = embedding_dim
-        self.batch_size = batch_size
-        self.max_enc_steps = max_enc_steps
-        self.max_dec_steps = max_dec_steps
-        self.beam_size = beam_size
-        self.min_dec_steps = min_dec_steps
-        self.vocab_size = vocab_size
-        self.rand_unif_init_mag = rand_unif_init_mag
-        self.trunc_norm_init_std = trunc_norm_init_std
-        self.max_grad_norm = max_grad_norm
+        super().__init__()
+        self.embedding = Embedding(embedding_dim, tokenizer)
+        self.encoder = PointerGeneratorEncoder(hidden_dim, embedding_dim)
+        self.state_reducer = PointerGeneratorStateReducer(hidden_dim)
 
-    def encoder(self, encoder_inputs: torch.Tensor, seq_len: torch.Tensor):
-        """Single-layer bi-directional LSTM encoder.
-
-        Args:
-        encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps, embedding_dim].
-        seq_len: Lengths of encoder_inputs (before padding). A tensor of shape [batch_size].
-
-        Returns:
-        encoder_outputs:
-            A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's 2*hidden_dim because it's the concatenation of the forwards and backwards states.
-        fw_state, bw_state:
-            Each are LSTMStateTuples of shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
-        """
-        self.encoder_bi_lstm = nn.LSTM(
-            input_size=self.embedding_dim,
-            hidden_size=self.hidden_dim,
-            num_layers=1,
-            bidirectional=True,
-            batch_first=True,
-        )
-        encoder_outputs, (hn, _) = self.encoder_bi_lstm(encoder_inputs)
-        return encoder_outputs, hn
+    def forward(self, inputs: dict[str, Any]):
+        encoder_embeddings = self.embedding(inputs["encoder_input_ids"])
+        encoder_output, lstm_state = self.encoder(encoder_embeddings)
+        self.decoder_init_state = self.state_reducer(lstm_state)
+        self.encoder_states = encoder_output
+        return encoder_output
 
 
 class AbstractiveSummarizationModel(LightningModule):
@@ -84,33 +134,20 @@ class AbstractiveSummarizationModel(LightningModule):
 
 # fmt: on
 
-inputs = {
-    "encoder_input_ids": [[263, 19, 8, 831, 1969, 5], [263, 19, 8, 200, 1969, 6, 59, 19409, 1, 1, 1, 5]],
-    "encoder_padding_mask": [[1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
-    "decoder_input_ids": [
-        [2, 263, 19, 8, 831, 1969, 5],
-        [2, 263, 19, 8, 200, 1969, 6, 59, 19409, 1, 1, 1, 5, 1],
-    ],
-    "decoder_padding_mask": [[1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
-    "decoder_target_ids": [
-        [263, 19, 8, 831, 1969, 5, 3],
-        [263, 19, 8, 200, 1969, 6, 59, 19409, 50000, 50001, 50002, 5, 1, 3],
-    ],
-    "encoder_inputs_extvoc": [
-        [263, 19, 8, 831, 1969, 5],
-        [263, 19, 8, 200, 1969, 6, 59, 19409, 50000, 50001, 50002, 5],
-    ],
-    "oovs": [[], ["modddsdsdel", "madffdfx", "ldddength"]],
-}
+
+def main():
+    dm = SummarizationDataModule()
+    dm.prepare_data()
+    dm.setup()
+    tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
+    model = PointerGeneratorSummarizatonModel(256, 128, 16, 400, 100, 4, 35, tokenizer)
+
+    for step, batch in enumerate(dm.train_dataloader()):
+        if step == 0:
+            output = model(batch)
+            print(output.size())
+            break
 
 
-def pack_input_sequences(batch: dict[str, list]) -> PackedSequence:
-    print(pack_sequence(batch))
-
-
-from torch.nn.utils.rnn import pack_sequence
-
-a = torch.tensor([1, 2, 3])
-b = torch.tensor([4, 5])
-c = torch.tensor([6])
-print(pad_packed_sequence(pack_sequence([a, b, c])))
+if __name__ == "__main__":
+    main()

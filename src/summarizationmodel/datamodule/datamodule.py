@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 from datasets import load_from_disk
@@ -23,7 +23,7 @@ class SummarizationDataCollator:
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
 
-    def pad_one_feature(self, batch: dict[str, list], name: str) -> dict[str, list]:
+    def pad_one_feature(self, batch: list[dict[str, Any]], name: str) -> dict[str, Any]:
         items = [example[name] for example in batch]
         max_length = max(len(i) for i in items)
         for example in batch:
@@ -34,11 +34,21 @@ class SummarizationDataCollator:
 
         return batch
 
-    def __call__(self, batch):
+    def __call__(self, batch: list[dict[str, Any]]):
         for feature_name in self.tokenizer.paddable_features:
             batch = self.pad_one_feature(batch, feature_name)
 
-        return batch
+        non_paddable_features = {
+            key: [example[key] for example in batch]
+            for key in batch[0].keys()
+            if key in self.tokenizer.non_paddable_features
+        }
+        paddable_features = {
+            key: torch.stack([example[key].clone() for example in batch])
+            for key in batch[0].keys()
+            if key in self.tokenizer.paddable_features
+        }
+        return {**paddable_features, **non_paddable_features}
 
 
 class SummarizationDataModule(LightningDataModule):
@@ -101,5 +111,5 @@ if __name__ == "__main__":
 
     for step, batch in enumerate(dm.train_dataloader()):
         if step == 0:
-            print(batch[:1])
+            print(batch)
             break

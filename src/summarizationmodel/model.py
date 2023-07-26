@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 from lightning.pytorch import LightningModule
-
-from src.summarizationmodel.config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
+from torch.nn.utils.rnn import pack_sequence, PackedSequence, pad_packed_sequence, pack_padded_sequence
+from summarizationmodel.config import MAX_ENCODER_STEPS, MAX_DECODER_STEPS
 
 
 class PointerGeneratorSummarizatonModel(nn.Module):
@@ -19,7 +19,8 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         vocab_size: int = 50000,                # Maximum size of vocabulary
         rand_unif_init_mag: float = 0.02,       # magnitude for LSTM cells random uniform inititalization
         trunc_norm_init_std: float = 1e-4,      # std of trunc norm initialization, used for everything else
-        max_grad_norm: float = 2.0,             # gradient clipping norm
+        max_grad_norm: float = 2.0,
+        # gradient clipping norm
         # fmt: on
     ):
         self.hidden_dim = hidden_dim
@@ -47,17 +48,15 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         fw_state, bw_state:
             Each are LSTMStateTuples of shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
         """
-        lstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim, num_layers=1, bidirectional=True, batch_first=True)
-
-        cell_bw = nn.LSTMCell(
-            self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+        self.encoder_bi_lstm = nn.LSTM(
+            input_size=self.embedding_dim,
+            hidden_size=self.hidden_dim,
+            num_layers=1,
+            bidirectional=True,
+            batch_first=True,
         )
-        # encoder_outputs, (fw_st, bw_st) = nn.bidirectional_dynamic_rnn(
-        #     cell_fw, cell_bw, encoder_inputs, dtype=torch.float32, sequence_length=seq_len, swap_memory=True
-        # )
-        # encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-        # concatenate the forwards and backwards states
-        return  # encoder_outputs, fw_st, bw_st
+        encoder_outputs, (hn, _) = self.encoder_bi_lstm(encoder_inputs)
+        return encoder_outputs, hn
 
 
 class AbstractiveSummarizationModel(LightningModule):
@@ -67,7 +66,7 @@ class AbstractiveSummarizationModel(LightningModule):
     """
 
     def __init__(self, model: PointerGeneratorSummarizatonModel, lr: float = 0.15):
-        self.lr = lr                            # learning rate
+        self.lr = lr  # learning rate
 
     # inputs
     # self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name="enc_batch")
@@ -81,4 +80,37 @@ class AbstractiveSummarizationModel(LightningModule):
     # self._dec_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps])
 
     # self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name="prev_coverage") (decode)
+
+
 # fmt: on
+
+inputs = {
+    "encoder_input_ids": [[263, 19, 8, 831, 1969, 5], [263, 19, 8, 200, 1969, 6, 59, 19409, 1, 1, 1, 5]],
+    "encoder_padding_mask": [[1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+    "decoder_input_ids": [
+        [2, 263, 19, 8, 831, 1969, 5],
+        [2, 263, 19, 8, 200, 1969, 6, 59, 19409, 1, 1, 1, 5, 1],
+    ],
+    "decoder_padding_mask": [[1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+    "decoder_target_ids": [
+        [263, 19, 8, 831, 1969, 5, 3],
+        [263, 19, 8, 200, 1969, 6, 59, 19409, 50000, 50001, 50002, 5, 1, 3],
+    ],
+    "encoder_inputs_extvoc": [
+        [263, 19, 8, 831, 1969, 5],
+        [263, 19, 8, 200, 1969, 6, 59, 19409, 50000, 50001, 50002, 5],
+    ],
+    "oovs": [[], ["modddsdsdel", "madffdfx", "ldddength"]],
+}
+
+
+def pack_input_sequences(batch: dict[str, list]) -> PackedSequence:
+    print(pack_sequence(batch))
+
+
+from torch.nn.utils.rnn import pack_sequence
+
+a = torch.tensor([1, 2, 3])
+b = torch.tensor([4, 5])
+c = torch.tensor([6])
+print(pad_packed_sequence(pack_sequence([a, b, c])))

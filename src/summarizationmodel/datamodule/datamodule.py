@@ -8,6 +8,7 @@ from datasets import load_from_disk
 from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pack_sequence, PackedSequence
 
 from summarizationmodel.config import DATA_DIR, TOKENIZER_DIR
 from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
@@ -17,13 +18,24 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 
+def prepare_list_for_packing(data: list[list]) -> list[torch.Tensor]:
+    return [torch.tensor(item) for item in data]
+
+
+def pack_sequences(data: list[list]) -> PackedSequence:
+    return pack_sequence(prepare_list_for_packing(data), enforce_sorted=False)
+
+
+Example = dict[str, Any]
+
+
 @dataclass
 class SummarizationDataCollator:
     tokenizer: SummarizationTokenizerFast
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
 
-    def pad_one_feature(self, batch: list[dict[str, Any]], name: str) -> dict[str, Any]:
+    def pad_one_feature(self, batch: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
         items = [example[name] for example in batch]
         max_length = max(len(i) for i in items)
         for example in batch:
@@ -37,7 +49,6 @@ class SummarizationDataCollator:
     def __call__(self, batch: list[dict[str, Any]]):
         for feature_name in self.tokenizer.paddable_features:
             batch = self.pad_one_feature(batch, feature_name)
-
         non_paddable_features = {
             key: [example[key] for example in batch]
             for key in batch[0].keys()
@@ -111,5 +122,5 @@ if __name__ == "__main__":
 
     for step, batch in enumerate(dm.train_dataloader()):
         if step == 0:
-            print(batch)
+            print(pack_sequences(batch["encoder_input_ids"]))
             break

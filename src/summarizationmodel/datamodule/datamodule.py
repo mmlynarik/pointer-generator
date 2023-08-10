@@ -49,15 +49,16 @@ class SummarizationDataCollator:
     def __call__(self, batch: list[dict[str, Any]]):
         for feature_name in self.tokenizer.paddable_features:
             batch = self.pad_one_feature(batch, feature_name)
-        non_paddable_features = {
-            key: [example[key] for example in batch]
-            for key in batch[0].keys()
-            if key in self.tokenizer.non_paddable_features
-        }
+
         paddable_features = {
             key: torch.stack([example[key].clone() for example in batch])
             for key in batch[0].keys()
             if key in self.tokenizer.paddable_features
+        }
+        non_paddable_features = {
+            key: [example[key] for example in batch]
+            for key in batch[0].keys()
+            if key in self.tokenizer.non_paddable_features
         }
         return {**paddable_features, **non_paddable_features}
 
@@ -122,5 +123,5 @@ if __name__ == "__main__":
 
     for step, batch in enumerate(dm.train_dataloader()):
         if step == 0:
-            print(pack_sequences(batch["encoder_input_ids"]))
+            print(batch["encoder_input_ids"])
             break

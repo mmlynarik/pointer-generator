@@ -380,24 +380,22 @@ class AbstractiveSummarizationModel(LightningModule):
 
 
 def main():
-    dm = SummarizationDataModule()
-    dm.prepare_data()
-    dm.setup()
+    datamodule = SummarizationDataModule()
+    datamodule.prepare_data()
+    datamodule.setup()
 
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
 
     model = PointerGeneratorSummarizatonModel(
         hidden_dim=256,
         embedding_dim=128,
-        max_dec_steps=tokenizer.max_decoder_steps,
         vocab_size=tokenizer.backend_tokenizer.get_vocab_size(),
         beam_size=4,
         min_dec_steps=35,
-
         pad_token_id=tokenizer.pad_token_id,
     )
 
-    for step, batch in enumerate(dm.train_dataloader()):
+    for step, batch in enumerate(datamodule.train_dataloader()):
         if step == 0:
             final_dists = model(batch)
             print(final_dists.size())

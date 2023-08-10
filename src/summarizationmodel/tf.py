@@ -52,7 +52,16 @@ with torch.no_grad():
         print(f"{h=} {c=}")
 
 
-indices = torch.tensor([[0, 3], [1, 3]])
-params = torch.tensor([[3, 4, 2, 1], [3, 2, 3, 1]])
+indices = torch.tensor(
+    [
+        [0, 2],
+        [1, 3],
+    ],
+)
+params = torch.tensor([[3, 4, 7, 5], [9, 1, 3, 6]])
 
 print(gather_nd(params, indices))
+
+
+indices = torch.tensor([[2], [3]])
+print(torch.gather(params, 1, indices).squeeze())

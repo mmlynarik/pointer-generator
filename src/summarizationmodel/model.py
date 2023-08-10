@@ -65,7 +65,7 @@ class PointerGeneratorEncoder(nn.Module):
         padding_mask: Boolean mask of shape [batch_size, max_enc_steps]
     Outputs:
         outputs: Tensor of shape [batch_size, max_enc_steps, 2 * hidden_dim]
-        last_state: Last LSTMState with attributes of shape [batch_size, 2 * hidden_dim]
+        reduced_last_state: Last LSTMState with attributes of shape [batch_size, hidden_dim]
     """
 
     def __init__(self, hidden_dim: int, embedding: SharedEmbedding):
@@ -89,8 +89,8 @@ class PointerGeneratorEncoder(nn.Module):
         outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs, batch_first=True)
 
         last_state = self.get_lstm_state_from_components(hidden_state, cell_state)
-        last_state = self.state_reducer(last_state)
-        return outputs, last_state
+        reduced_last_state = self.state_reducer(last_state)
+        return outputs, reduced_last_state
 
     def get_input_lengths(self, padding_mask: pt.Tensor) -> pt.Tensor:
         return padding_mask.sum(dim=1)
@@ -153,7 +153,7 @@ class BahdanauAttn(nn.Module):
         encoder_outputs: pt.Tensor,
         encoder_padding_mask: pt.Tensor,
         decoder_state: LSTMState,
-        coverage: Optional[pt.Tensor] = None,
+        _: None,
     ):
         decoder_state = decoder_state.concatenated.unsqueeze(dim=1)
         encoder_padding_mask = encoder_padding_mask.unsqueeze(dim=2)
@@ -188,7 +188,7 @@ class VocabularyDistribution(nn.Module):
 
 
 class GenerationProbability(nn.Module):
-    """Calculate generation probability from state, input and and context vectors."""
+    """Calculate generation probability from decoder state, input and and context vectors."""
 
     def __init__(self, hidden_dim: int):
         super().__init__()
@@ -207,12 +207,13 @@ class PointerGeneratorDecoder(nn.Module):
     Inputs:
         input_ids: Summary token ids of shape [batch_size, max_dec_steps]
         initial_state: Initial LSTMState with attributes of shape [batch_size, hidden_dim]
-        encoder_outputs: Encoder outputs tensor of shape [batch_size, max_enc_steps, 2*hidden_dim]
-        encoder_mask: Boolean padding mask of shape [batch_size, max_enc_steps]
+        encoder_outputs: Encoder outputs tensor of shape [batch_size, max_enc_seq_len, 2*hidden_dim]
+        encoder_mask: Boolean padding mask of shape [batch_size, max_enc_seq_len]
         prev_coverage: Previous coverage vector, used during decoding of shape [batch_size, attention_length]
     Outputs:
-        vocab_dists: Vocabulary distributions of shape [batch_size, max_dec_steps, vocab_size]
-        attn_dists: Attention distributions of shape [batch_size, max_dec_steps, max_enc_steps]
+        vocab_dists: Vocabulary distributions of shape [batch_size, max_dec_seq_len, vocab_size]. The words
+        are in the order they appear in the tokenizer vocabulary.
+        attn_dists: Attention distributions of shape [batch_size, max_dec_seq_len, max_enc_seq_len]
         pgens: Generation probabilities of shape [batch_size, max_dec_steps]
         coverage: Coverage vector of shape [batch_size, 2 * hidden_dim]
         state: Last decoder LSTMState
@@ -244,12 +245,12 @@ class PointerGeneratorDecoder(nn.Module):
         encoder_outputs: pt.Tensor,
         encoder_mask: pt.Tensor,
         prev_coverage: Optional[pt.Tensor] = None,
-    ) -> tuple[pt.Tensor, LSTMState]:
+    ) -> tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor, LSTMState]:
         vocab_dists, attn_dists, pgens = [], [], []
 
         state: LSTMState = initial_state
         coverage = prev_coverage
-        context = pt.zeros(encoder_outputs.size()[0], encoder_outputs.size()[2])
+        context = pt.zeros(encoder_outputs.shape[::2])
 
         if self.initial_state_attention:  # true in decode mode
             context, _, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
@@ -284,9 +285,6 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         self,
         hidden_dim: int,                        # dimension of LSTM hidden states
         embedding_dim: int,                     # dimension of word embedding
-        batch_size: int,                        # minibatch size
-        max_enc_steps: int,                     # max timesteps of encoder (max source text tokens)
-        max_dec_steps: int,                     # max timesteps of decoder (max summary tokens)
         beam_size: int,                         # beam size for beam search decoding.
         min_dec_steps: int,                     # Minimum seq length of generated summary. For decoding mode
         vocab_size: int,                        # vocab size
@@ -298,25 +296,67 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         # fmt: on
     ):
         super().__init__()
-        embedding = SharedEmbedding(embedding_dim, vocab_size, pad_token_id)
-        self.encoder = PointerGeneratorEncoder(hidden_dim, embedding)
-        self.decoder = PointerGeneratorDecoder(hidden_dim, vocab_size, embedding, False, False)
+        self.vocab_size = vocab_size
+        self.embedding = SharedEmbedding(embedding_dim, vocab_size, pad_token_id)
+        self.encoder = PointerGeneratorEncoder(hidden_dim, self.embedding)
+        self.decoder = PointerGeneratorDecoder(hidden_dim, vocab_size, self.embedding, False, False)
 
-    def forward(self, inputs: dict[str, Any]):
-        encoder_input_ids, encoder_padding_mask = inputs["encoder_input_ids"], inputs["encoder_padding_mask"]
+    def forward(self, inputs: dict[str, Any]) -> pt.Tensor:
+        encoder_input_ids = inputs["encoder_input_ids"]
+        encoder_padding_mask = inputs["encoder_padding_mask"]
         decoder_input_ids = inputs["decoder_input_ids"]
+        oovs = inputs["oovs"]
+        encoder_inputs_extvoc = inputs["encoder_inputs_extvoc"]
 
-        encoder_outputs, encoder_last_state = self.encoder(encoder_input_ids, encoder_padding_mask)
+        encoder_outputs, encoder_reduced_last_state = self.encoder(encoder_input_ids, encoder_padding_mask)
         vocab_dists, attn_dists, pgens, coverage, state = self.decoder(
-            decoder_input_ids, encoder_last_state, encoder_outputs, encoder_padding_mask, None
+            decoder_input_ids, encoder_reduced_last_state, encoder_outputs, encoder_padding_mask, None
         )
-        return vocab_dists
+        max_article_oovs = self.get_max_article_oovs(oovs)
+        return self.calc_final_dists(vocab_dists, attn_dists, pgens, max_article_oovs, encoder_inputs_extvoc)
+
+    def get_max_article_oovs(self, oovs: list[list[int]]) -> int:
+        return max(len(example_oovs) for example_oovs in oovs)
+
+    def calc_final_dists(
+        self,
+        vocab_dists: pt.Tensor,
+        attn_dists: pt.Tensor,
+        pgens: pt.Tensor,
+        max_article_oovs: int,
+        encoder_inputs_extvoc: pt.Tensor,
+    ) -> pt.Tensor:
+        """Calculate final token distributions from vocab distributions and attention distributions by projecting the attn dists onto extended vocab size tensor and summing it with extended vocab dists.
+
+        Args:
+            vocab_dists: The vocabulary distributions of shape [batch_size, max_dec_steps, vocab_size]
+            The words are in the order they appear in the vocabulary file.
+            attn_dists: The attention distributions of shape [batch_size, max_dec_seq_len, max_enc_seq_len].
+            pgens: The generation probabilities of shape [batch_size, max_dec_seq_len].
+            max_article_oovs: Maximum over each example in the batch number of in-article oovs.
+            encoder_inputs_extvoc: Article extended-vocabulary token ids including OOV words of shape
+            [batch_size, max_enc_seq_len].
+
+        Returns:
+        Final_dists: The final distributions of shape [batch_size, max_dec_steps, extended_vocab_size].
+        """
+        vocab_dists = pgens * vocab_dists
+        attn_dists = (1 - pgens) * attn_dists
+
+        batch_size, max_dec_steps = vocab_dists.shape[:2]
+        extended_vocab_size = self.vocab_size + max_article_oovs
+        extra_zeros = pt.zeros(batch_size, max_dec_steps, max_article_oovs)
+        vocab_dists_extended = pt.concat([vocab_dists, extra_zeros], dim=2)
+
+        index = pt.stack(max_dec_steps * [encoder_inputs_extvoc.long()], dim=1)
+        projection = pt.zeros(batch_size, max_dec_steps, extended_vocab_size)
+        attn_dists_projected = projection.scatter_add(2, index, attn_dists)
+        return vocab_dists_extended + attn_dists_projected
 
 
 class AbstractiveSummarizationModel(LightningModule):
     """
-    A class to represent a seq-to-seq model for text summarization with pointer-generator mode and coverage.
-    It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and HuggingFace-based objects.
+    A class to represent an abstractive seq2seq model for text summarization with pointer-generator network and coverage. It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and Transformers libraries.
     """
 
     def __init__(self, model: PointerGeneratorSummarizatonModel, lr: float = 0.15):
@@ -345,15 +385,22 @@ def main():
     dm.setup()
 
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
-    vocab_size = tokenizer.backend_tokenizer.get_vocab_size()
-    pad_token_id = tokenizer.pad_token_id
 
-    model = PointerGeneratorSummarizatonModel(256, 128, 32, 400, 100, 4, 35, vocab_size, pad_token_id)
+    model = PointerGeneratorSummarizatonModel(
+        hidden_dim=256,
+        embedding_dim=128,
+        max_dec_steps=tokenizer.max_decoder_steps,
+        vocab_size=tokenizer.backend_tokenizer.get_vocab_size(),
+        beam_size=4,
+        min_dec_steps=35,
+
+        pad_token_id=tokenizer.pad_token_id,
+    )
 
     for step, batch in enumerate(dm.train_dataloader()):
         if step == 0:
-            encoder_output = model(batch)
-            print(encoder_output.shape)
+            final_dists = model(batch)
+            print(final_dists.size())
             break
 
 

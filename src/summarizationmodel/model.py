@@ -1,25 +1,18 @@
 from typing import Any, Optional, NamedTuple
-from dataclasses import dataclass
 
 import torch as pt
 from torch import nn
 from lightning.pytorch import LightningModule
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from summarizationmodel.datamodule.datamodule import SummarizationDataModule
 from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
-from summarizationmodel.config import (
-    END_TOKEN,
-    MAX_DECODER_STEPS,
-    MAX_ENCODER_STEPS,
-    NON_PADDABLE_FEATURES,
-    PADDABLE_FEATURES,
-    START_TOKEN,
-    TOKENIZER_DIR,
-)
+from summarizationmodel.config import TOKENIZER_DIR
+from summarizationmodel.utils import timeit, is_finite
 
 
 class LSTMState(NamedTuple):
-    """Single-layer LSTM state consisting of two attributes of shape [batch_size, current_hidden_dim]."""
+    """Single-layer LSTM state consisting of two attributes of shape [batch_size, state_dim]."""
 
     hidden_state: pt.Tensor
     cell_state: pt.Tensor
@@ -161,8 +154,7 @@ class BahdanauAttn(nn.Module):
         encoder_features = self.Wh(encoder_outputs)
         decoder_features = self.Ws(decoder_state)
         attn_scores = self.v(pt.tanh(encoder_features + decoder_features))  # B-L-1
-
-        masked_scores = attn_scores.masked_fill(encoder_padding_mask, -float("inf"))
+        masked_scores = attn_scores.masked_fill(1 - encoder_padding_mask, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
         context = attn_dist * encoder_outputs
@@ -343,13 +335,13 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         vocab_dists = pgens * vocab_dists
         attn_dists = (1 - pgens) * attn_dists
 
-        batch_size, max_dec_steps = vocab_dists.shape[:2]
+        batch_size, max_dec_seq_len = vocab_dists.shape[:2]
         extended_vocab_size = self.vocab_size + max_article_oovs
-        extra_zeros = pt.zeros(batch_size, max_dec_steps, max_article_oovs)
+        extra_zeros = pt.zeros(batch_size, max_dec_seq_len, max_article_oovs)
         vocab_dists_extended = pt.concat([vocab_dists, extra_zeros], dim=2)
 
-        index = pt.stack(max_dec_steps * [encoder_inputs_extvoc.long()], dim=1)
-        projection = pt.zeros(batch_size, max_dec_steps, extended_vocab_size)
+        index = pt.stack(max_dec_seq_len * [encoder_inputs_extvoc.long()], dim=1)
+        projection = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size)
         attn_dists_projected = projection.scatter_add(2, index, attn_dists)
         return vocab_dists_extended + attn_dists_projected
 
@@ -361,26 +353,24 @@ class AbstractiveSummarizationModel(LightningModule):
 
     def __init__(self, model: PointerGeneratorSummarizatonModel, lr: float = 0.15):
         self.lr = lr  # learning rate
+        self.model = model
+        self.adagrad_init_acc = 0.1
+        self.save_hyperparameters("learning_rate")
+        self.metric = {}
 
-    # inputs
-    # self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name="enc_batch")
-    # self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name="enc_lens")
-    # self._enc_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None], name="enc_padding_mask")
-    # self._enc_batch_extend_vocab = tf.placeholder(# tf.int32, [hps.batch_size, None])
+    def forward(self, x: pt.Tensor) -> pt.Tensor:
+        return self.model(x)
 
-    # self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name="dec_batch")
-    # self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps])
-    # self._max_art_oovs = tf.placeholder(tf.int32, [], name="max_art_oovs")
-    # self._dec_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps])
+    def training_step(batch: dict[str, Any], batch_idx: int) -> STEP_OUTPUT:
+        pass
 
-    # self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name="prev_coverage") (decode)
-
-
-# fmt: on
+    def validation_step(batch: dict[str, Any], batch_idx: int) -> STEP_OUTPUT:
+        pass
 
 
+@timeit
 def main():
-    datamodule = SummarizationDataModule()
+    datamodule = SummarizationDataModule(batch_size=16)
     datamodule.prepare_data()
     datamodule.setup()
 
@@ -396,9 +386,9 @@ def main():
     )
 
     for step, batch in enumerate(datamodule.train_dataloader()):
-        if step == 0:
-            final_dists = model(batch)
-            print(final_dists.size())
+        final_dists = model(batch)
+        print(is_finite(final_dists))
+        if step == 9:
             break
 
 

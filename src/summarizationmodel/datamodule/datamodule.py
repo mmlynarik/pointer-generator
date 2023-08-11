@@ -8,7 +8,6 @@ from datasets import load_from_disk
 from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pack_sequence, PackedSequence
 
 from summarizationmodel.config import DATA_DIR, TOKENIZER_DIR
 from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
@@ -16,17 +15,6 @@ from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
-
-
-def prepare_list_for_packing(data: list[list]) -> list[torch.Tensor]:
-    return [torch.tensor(item) for item in data]
-
-
-def pack_sequences(data: list[list]) -> PackedSequence:
-    return pack_sequence(prepare_list_for_packing(data), enforce_sorted=False)
-
-
-Example = dict[str, Any]
 
 
 @dataclass

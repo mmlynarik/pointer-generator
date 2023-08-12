@@ -56,8 +56,8 @@ class SummarizationDataModule(LightningDataModule):
         self,
         batch_size: int = 32,
         dataset_version: str = "3.0.0",
-        tokenizer_dir: str = TOKENIZER_DIR,
-        data_dir: str = DATA_DIR,
+        tokenizer_dir: Path = TOKENIZER_DIR,
+        data_dir: Path = DATA_DIR,
     ):
         super().__init__()
         self.batch_size = batch_size

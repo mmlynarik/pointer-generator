@@ -7,7 +7,6 @@ from transformers import PreTrainedTokenizerFast
 from summarizationmodel.config import (
     END_TOKEN,
     PAD_TOKEN,
-    SPECIAL_TOKENS,
     START_TOKEN,
     TOKENIZER_DIR,
     UNK_TOKEN,
@@ -31,7 +30,8 @@ def train_base_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path)
     ]
     normalizer = normalizers.Sequence(normalizers_list)
     pre_tokenizer = pre_tokenizers.Whitespace()
-    trainer = trainers.WordLevelTrainer(vocab_size=VOCAB_SIZE, special_tokens=SPECIAL_TOKENS)
+    special_tokens = [PAD_TOKEN, UNK_TOKEN, START_TOKEN, END_TOKEN]
+    trainer = trainers.WordLevelTrainer(vocab_size=VOCAB_SIZE, special_tokens=special_tokens)
 
     backend_tokenizer = Tokenizer(model=models.WordLevel(unk_token=UNK_TOKEN))
     backend_tokenizer.normalizer = normalizer

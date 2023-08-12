@@ -21,6 +21,10 @@ class LSTMState(NamedTuple):
     def concatenated(self) -> pt.Tensor:
         return pt.cat([self.hidden_state, self.cell_state], dim=1)
 
+    @classmethod
+    def from_tuple(cls, state: tuple[pt.Tensor, pt.Tensor]) -> "LSTMState":
+        return cls(state[0], state[1])
+
 
 class SharedEmbedding(nn.Module):
     def __init__(self, embedding_dim: int, vocab_size: int, pad_token_id: int):
@@ -122,7 +126,7 @@ class BahdanauAttnWithCoverage(nn.Module):
         coverage_features = self.wc(coverage)
         attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
 
-        masked_scores = attn_scores.masked_fill(encoder_padding_mask, -float("inf"))
+        masked_scores = attn_scores.masked_fill(1 - encoder_padding_mask, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
         context = attn_dist * encoder_outputs
@@ -251,8 +255,8 @@ class PointerGeneratorDecoder(nn.Module):
         for step, step_embeddings in enumerate(embeddings.transpose(0, 1)):
             concatenated_input = pt.cat([step_embeddings, context], dim=1)
             x = self.reducer(concatenated_input)
-            state = self.lstm_cell(x, state)
-            state = LSTMState(state[0], state[1])
+            state: tuple[pt.Tensor, pt.Tensor] = self.lstm_cell(x, state)
+            state = LSTMState.from_tuple(state)
 
             if step == 0 and self.initial_state_attention:
                 context, attn_dist, _ = self.attention(encoder_outputs, encoder_mask, state, coverage)
@@ -279,21 +283,23 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         embedding_dim: int,                     # dimension of word embedding
         beam_size: int,                         # beam size for beam search decoding.
         min_dec_steps: int,                     # Minimum seq length of generated summary. For decoding mode
-        vocab_size: int,                        # vocab size
+        vocab_size: int,                        # Vocab size
         pad_token_id: int,                      # pad token id
-        rand_unif_init_mag: float = 0.02,       # magnitude for LSTM cells random uniform inititalization
-        trunc_norm_init_std: float = 1e-4,      # std of trunc norm initialization, used for everything else
-        max_grad_norm: float = 2.0,
-        # gradient clipping norm
+        # rand_unif_init_mag: float = 0.02,       # magnitude for LSTM cells random uniform inititalization
+        # trunc_norm_init_std: float = 1e-4,      # std of trunc norm initialization, used for everything else
+        use_coverage: bool = False,
         # fmt: on
     ):
         super().__init__()
         self.vocab_size = vocab_size
+        self.use_coverage = use_coverage
+        self.beam_size = beam_size
+        self.min_dec_steps = min_dec_steps
         self.embedding = SharedEmbedding(embedding_dim, vocab_size, pad_token_id)
         self.encoder = PointerGeneratorEncoder(hidden_dim, self.embedding)
-        self.decoder = PointerGeneratorDecoder(hidden_dim, vocab_size, self.embedding, False, False)
+        self.decoder = PointerGeneratorDecoder(hidden_dim, vocab_size, self.embedding, False, use_coverage)
 
-    def forward(self, inputs: dict[str, Any]) -> pt.Tensor:
+    def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
         encoder_input_ids = inputs["encoder_input_ids"]
         encoder_padding_mask = inputs["encoder_padding_mask"]
         decoder_input_ids = inputs["decoder_input_ids"]
@@ -305,7 +311,10 @@ class PointerGeneratorSummarizatonModel(nn.Module):
             decoder_input_ids, encoder_reduced_last_state, encoder_outputs, encoder_padding_mask, None
         )
         max_article_oovs = self.get_max_article_oovs(oovs)
-        return self.calc_final_dists(vocab_dists, attn_dists, pgens, max_article_oovs, encoder_inputs_extvoc)
+        final_dists = self.calc_final_dists(
+            vocab_dists, attn_dists, pgens, max_article_oovs, encoder_inputs_extvoc
+        )
+        return final_dists, attn_dists
 
     def get_max_article_oovs(self, oovs: list[list[int]]) -> int:
         return max(len(example_oovs) for example_oovs in oovs)
@@ -341,9 +350,10 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         vocab_dists_extended = pt.concat([vocab_dists, extra_zeros], dim=2)
 
         index = pt.stack(max_dec_seq_len * [encoder_inputs_extvoc.long()], dim=1)
-        projection = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size)
-        attn_dists_projected = projection.scatter_add(2, index, attn_dists)
-        return vocab_dists_extended + attn_dists_projected
+        projection_base = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size)
+        attn_dists_projected = projection_base.scatter_add(2, index, attn_dists)
+        final_dists = vocab_dists_extended + attn_dists_projected
+        return final_dists
 
 
 class AbstractiveSummarizationModel(LightningModule):
@@ -351,21 +361,78 @@ class AbstractiveSummarizationModel(LightningModule):
     A class to represent an abstractive seq2seq model for text summarization with pointer-generator network and coverage. It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and Transformers libraries.
     """
 
-    def __init__(self, model: PointerGeneratorSummarizatonModel, lr: float = 0.15):
-        self.lr = lr  # learning rate
+    def __init__(
+        self,
+        model: PointerGeneratorSummarizatonModel,
+        learning_rate: float = 0.15,
+        adagrad_init_acc: float = 0.1,
+        cov_loss_weight: float = 1.0,
+        max_grad_norm: int = 2,
+    ):
+        super().__init__()
+        self.learning_rate = learning_rate
         self.model = model
-        self.adagrad_init_acc = 0.1
-        self.save_hyperparameters("learning_rate")
-        self.metric = {}
+        self.adagrad_init_acc = adagrad_init_acc
+        self.cov_loss_weight = cov_loss_weight
+        self.max_grad_norm = max_grad_norm
+        self.save_hyperparameters(ignore=["model"])
+        self.metrics = {}
 
-    def forward(self, x: pt.Tensor) -> pt.Tensor:
-        return self.model(x)
+    def forward(self, batch: pt.Tensor) -> pt.Tensor:
+        final_dists, _ = self.model(batch)
+        return final_dists
 
-    def training_step(batch: dict[str, Any], batch_idx: int) -> STEP_OUTPUT:
-        pass
+    def _calc_primary_loss(self, final_dists: pt.Tensor, decoder_target_ids: pt.Tensor) -> pt.Tensor:
+        """Calculate the primary loss of the model from final token distributions and targets."""
+        return pt.stack(
+            [
+                pt.nn.functional.nll_loss(pt.log(example_probs), example_targets.long(), ignore_index=0)
+                for example_probs, example_targets in zip(final_dists, decoder_target_ids)
+            ]
+        ).mean()
 
-    def validation_step(batch: dict[str, Any], batch_idx: int) -> STEP_OUTPUT:
-        pass
+    def _calc_coverage_loss(self, attn_dists: pt.Tensor, decoder_padding_mask: pt.Tensor) -> pt.Tensor:
+        """
+        Calculate the coverage loss from the attention distributions. First, calculate the coverage losses  for each decoder step and then doubly averaging the resulting tensor of shape [batch_size, dec_max_seq_len] using the decoder padding mask into a scalar.
+        """
+        coverage = pt.zeros(attn_dists.shape[::2])
+        covlosses_per_dec_step = []
+        for attn_dist_dec_step in attn_dists.transpose(0, 1):
+            covloss = pt.minimum(attn_dist_dec_step, coverage).sum(dim=1)
+            covlosses_per_dec_step.append(covloss)
+            coverage += attn_dist_dec_step
+
+        covlosses_per_dec_step = pt.stack(covlosses_per_dec_step, dim=1)
+        covlosses_per_dec_step *= decoder_padding_mask
+        covlosses_per_dec_step.sum(dim=1) / decoder_padding_mask.sum(dim=1)
+        return covlosses_per_dec_step.mean()
+
+    def training_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
+        decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
+        final_dists, attn_dists = self.model(batch)
+        loss = self._calc_primary_loss(final_dists, decoder_target_ids, decoder_padding_mask)
+        if self.model.use_coverage:
+            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
+            loss += self.cov_loss_weight * coverage_loss
+
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
+        decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
+        final_dists, attn_dists = self.model(batch)
+        loss = self.calc_primary_loss(final_dists, decoder_target_ids, decoder_padding_mask)
+        if self.model.use_coverage:
+            coverage_loss = self.calc_coverage_loss(attn_dists, decoder_padding_mask)
+            loss += self.cov_loss_weight * coverage_loss
+        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def configure_optimizers(self) -> Any:
+        optimizer = pt.optim.Adagrad(
+            self.parameters, self.learning_rate, initial_accumulator_value=self.adagrad_init_acc
+        )
+        return optimizer
 
 
 @timeit
@@ -375,7 +442,7 @@ def main():
     datamodule.setup()
 
     tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
-
+    # max_grad_norm: float = 2.0,
     model = PointerGeneratorSummarizatonModel(
         hidden_dim=256,
         embedding_dim=128,
@@ -384,10 +451,10 @@ def main():
         min_dec_steps=35,
         pad_token_id=tokenizer.pad_token_id,
     )
-
+    pl_module = AbstractiveSummarizationModel(model)
     for step, batch in enumerate(datamodule.train_dataloader()):
-        final_dists = model(batch)
-        print(is_finite(final_dists))
+        final_dists, attn_dists = model(batch)
+        print(final_dists.shape)
         if step == 9:
             break
 

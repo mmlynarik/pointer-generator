@@ -2,8 +2,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Callable, Sequence, Union
 
-import torch
-from datasets import Dataset
 from tokenizers import Tokenizer, processors
 from transformers import BatchEncoding, PreTrainedTokenizerFast
 
@@ -11,8 +9,6 @@ from summarizationmodel.config import (
     END_TOKEN,
     MAX_DECODER_STEPS,
     MAX_ENCODER_STEPS,
-    NON_PADDABLE_FEATURES,
-    PADDABLE_FEATURES,
     START_TOKEN,
     TOKENIZER_DIR,
 )
@@ -21,6 +17,18 @@ TEXT = Union[str, Sequence[str]]
 TokenizerFunction = Callable[[TEXT], BatchEncoding]
 TruncationChecker = Callable[[TEXT], bool]
 START_OR_END_TOKEN = Union[START_TOKEN, END_TOKEN]
+
+
+PADDABLE_FEATURES = [
+    "encoder_input_ids",
+    "encoder_padding_mask",
+    "decoder_input_ids",
+    "decoder_padding_mask",
+    "decoder_target_ids",
+    "encoder_inputs_extvoc",
+]
+
+NON_PADDABLE_FEATURES = ["oovs"]
 
 
 class SummarizationTokenizerFast(PreTrainedTokenizerFast):

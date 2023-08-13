@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 import torch
 from datasets import load_from_disk
@@ -9,7 +9,7 @@ from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
 
-from summarizationmodel.config import DATA_DIR, TOKENIZER_DIR
+from summarizationmodel.datamodule.config import DATA_DIR, TOKENIZER_DIR
 from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
 from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
 
@@ -54,7 +54,7 @@ class SummarizationDataCollator:
 class SummarizationDataModule(LightningDataModule):
     def __init__(
         self,
-        batch_size: int = 32,
+        batch_size: int,
         dataset_version: str = "3.0.0",
         tokenizer_dir: Path = TOKENIZER_DIR,
         data_dir: Path = DATA_DIR,
@@ -87,21 +87,37 @@ class SummarizationDataModule(LightningDataModule):
 
         if stage is None or stage == "fit":
             self.train_dataset = encoded_dataset["train"]
-        if stage is None or stage == "validate":
+        if stage is None or stage in ["fit", "validate"]:
             self.val_dataset = encoded_dataset["validation"]
         if stage is None or stage == "test":
             self.test_dataset = encoded_dataset["test"]
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return DataLoader(
-            self.train_dataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.data_collator
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            collate_fn=self.data_collator,
+            num_workers=4,
         )
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, collate_fn=self.data_collator)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            collate_fn=self.data_collator,
+            num_workers=4,
+        )
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, collate_fn=self.data_collator)
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            collate_fn=self.data_collator,
+            num_workers=4,
+        )
 
 
 if __name__ == "__main__":
@@ -109,7 +125,7 @@ if __name__ == "__main__":
     dm.prepare_data()
     dm.setup()
 
-    for step, batch in enumerate(dm.train_dataloader()):
+    for step, batch in enumerate(dm.val_dataloader()):
         if step == 0:
             print(batch["encoder_input_ids"])
             break

@@ -6,7 +6,7 @@ from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5_fast import T5TokenizerFast
 from transformers.tokenization_utils_base import BatchEncoding
 
-from src.summarizationmodel.config import (
+from summarizationmodel.datamodule.config import (
     END_TOKEN,
     START_TOKEN,
 )

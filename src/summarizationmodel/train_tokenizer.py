@@ -4,7 +4,7 @@ from datasets import Dataset
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from summarizationmodel.config import (
+from summarizationmodel.datamodule.config import (
     END_TOKEN,
     PAD_TOKEN,
     START_TOKEN,

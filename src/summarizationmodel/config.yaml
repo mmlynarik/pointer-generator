@@ -1,0 +1,72 @@
+# lightning.pytorch==2.0.3
+seed_everything: true
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  logger: null
+  callbacks: null
+  fast_dev_run: false
+  max_epochs: null
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: null
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+model:
+  model: "PointerGeneratorSummarizatonModel(\n  (embedding): SharedEmbedding(\n  \
+    \  (embedding): Embedding(50000, 128, padding_idx=0)\n  )\n  (encoder): PointerGeneratorEncoder(\n\
+    \    (embedding): SharedEmbedding(\n      (embedding): Embedding(50000, 128, padding_idx=0)\n\
+    \    )\n    (lstm): LSTM(128, 256, batch_first=True, bidirectional=True)\n   \
+    \ (state_reducer): PointerGeneratorStateReducer(\n      (cell): Linear(in_features=512,\
+    \ out_features=256, bias=True)\n      (hidden): Linear(in_features=512, out_features=256,\
+    \ bias=True)\n      (relu): ReLU()\n    )\n  )\n  (decoder): PointerGeneratorDecoder(\n\
+    \    (embedding): SharedEmbedding(\n      (embedding): Embedding(50000, 128, padding_idx=0)\n\
+    \    )\n    (reducer): Linear(in_features=640, out_features=256, bias=True)\n\
+    \    (lstm_cell): LSTMCell(256, 256)\n    (attention): BahdanauAttn(\n      (Wh):\
+    \ Linear(in_features=512, out_features=256, bias=False)\n      (Ws): Linear(in_features=512,\
+    \ out_features=256, bias=True)\n      (v): Linear(in_features=256, out_features=1,\
+    \ bias=False)\n    )\n    (pgen): GenerationProbability(\n      (wh): Linear(in_features=512,\
+    \ out_features=1, bias=False)\n      (ws): Linear(in_features=512, out_features=1,\
+    \ bias=False)\n      (wx): Linear(in_features=256, out_features=1, bias=True)\n\
+    \      (sigmoid): Sigmoid()\n    )\n    (vocab_dist): VocabularyDistribution(\n\
+    \      (reducer): Linear(in_features=768, out_features=256, bias=True)\n     \
+    \ (output): Linear(in_features=256, out_features=50000, bias=True)\n      (softmax):\
+    \ Softmax(dim=1)\n    )\n  )\n)"
+  learning_rate: 0.15
+  adagrad_init_acc: 0.1
+  cov_loss_weight: 1.0
+  max_grad_norm: 2
+data:
+  batch_size: 32
+  dataset_version: 3.0.0
+  tokenizer_dir: /home/miro/python/pointer-generator/src/summarizationmodel/trained_tokenizer
+  data_dir: /home/miro/python/pointer-generator/data
+ckpt_path: null

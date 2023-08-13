@@ -18,7 +18,7 @@
 
 import time
 import os
-import tensorflow as tf
+import torch as tf
 import numpy as np
 from collections import namedtuple
 from abisee.data import Vocab
@@ -26,7 +26,7 @@ from abisee.batcher import Batcher
 from abisee.model import SummarizationModel
 from abisee.decode import BeamSearchDecoder
 import abisee.util as util
-from tensorflow.python import debug as tf_debug
+from torch import debug as tf_debug
 
 FLAGS = tf.app.flags.FLAGS
 

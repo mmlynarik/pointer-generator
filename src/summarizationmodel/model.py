@@ -1,14 +1,31 @@
-from typing import Any, Optional, NamedTuple
+from dataclasses import dataclass
+from typing import Any, NamedTuple, Optional
+from pathlib import Path
 
 import torch as pt
-from torch import nn
 from lightning.pytorch import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
+from torch import nn
 
+from summarizationmodel.datamodule.config import VOCAB_SIZE, TOKENIZER_DIR, DATA_DIR
 from summarizationmodel.datamodule.datamodule import SummarizationDataModule
-from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
-from summarizationmodel.config import TOKENIZER_DIR
 from summarizationmodel.utils import timeit
+
+
+# Model config from research paper
+@dataclass
+class ModelConfig:
+    hidden_dim: int = 256
+    embedding_dim: int = 128
+    beam_size: int = 4
+    min_dec_steps: int = 35
+    vocab_size: int = VOCAB_SIZE
+    pad_token_id: int = 0
+    use_coverage: bool = False
+    learning_rate: float = 0.15
+    adagrad_init_acc: float = 0.1
+    cov_loss_weight: float = 1.0
+    max_grad_norm: int = 2
 
 
 class LSTMState(NamedTuple):
@@ -81,7 +98,7 @@ class PointerGeneratorEncoder(nn.Module):
         embeddings = self.embedding(input_ids)
         lengths = self.get_input_lengths(padding_mask)
 
-        packed_embeddings = nn.utils.rnn.pack_padded_sequence(embeddings, lengths, True, False)
+        packed_embeddings = nn.utils.rnn.pack_padded_sequence(embeddings, lengths.cpu(), True, False)
         packed_outputs, (hidden_state, cell_state) = self.lstm(packed_embeddings)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs, batch_first=True)
 
@@ -126,7 +143,7 @@ class BahdanauAttnWithCoverage(nn.Module):
         coverage_features = self.wc(coverage)
         attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
 
-        masked_scores = attn_scores.masked_fill(1 - encoder_padding_mask, -float("inf"))
+        masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
         context = attn_dist * encoder_outputs
@@ -158,7 +175,7 @@ class BahdanauAttn(nn.Module):
         encoder_features = self.Wh(encoder_outputs)
         decoder_features = self.Ws(decoder_state)
         attn_scores = self.v(pt.tanh(encoder_features + decoder_features))  # B-L-1
-        masked_scores = attn_scores.masked_fill(1 - encoder_padding_mask, -float("inf"))
+        masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
         context = attn_dist * encoder_outputs
@@ -246,7 +263,7 @@ class PointerGeneratorDecoder(nn.Module):
 
         state: LSTMState = initial_state
         coverage = prev_coverage
-        context = pt.zeros(encoder_outputs.shape[::2])
+        context = pt.zeros(encoder_outputs.shape[::2]).cuda()
 
         if self.initial_state_attention:  # true in decode mode
             context, _, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
@@ -267,7 +284,7 @@ class PointerGeneratorDecoder(nn.Module):
             attn_dists.append(attn_dist)
             pgens.append(self.pgen(x, state.concatenated, context))
             vocab_dists.append(self.vocab_dist(concatenated_lstm_output))
-
+        print([vocab_dists[i].shape for i in range(len(vocab_dists))])
         vocab_dists = pt.stack(vocab_dists, dim=1)
         attn_dists = pt.stack(attn_dists, dim=1)
         pgens = pt.stack(pgens, dim=1)
@@ -275,29 +292,22 @@ class PointerGeneratorDecoder(nn.Module):
         return vocab_dists, attn_dists, pgens, coverage, state
 
 
-class PointerGeneratorSummarizatonModel(nn.Module):
-    def __init__(
-        # fmt: off
-        self,
-        hidden_dim: int,                        # dimension of LSTM hidden states
-        embedding_dim: int,                     # dimension of word embedding
-        beam_size: int,                         # beam size for beam search decoding.
-        min_dec_steps: int,                     # Minimum seq length of generated summary. For decoding mode
-        vocab_size: int,                        # Vocab size
-        pad_token_id: int,                      # pad token id
-        # rand_unif_init_mag: float = 0.02,       # magnitude for LSTM cells random uniform inititalization
-        # trunc_norm_init_std: float = 1e-4,      # std of trunc norm initialization, used for everything else
-        use_coverage: bool = False,
-        # fmt: on
-    ):
+class PointerGeneratorSummarizationModel(nn.Module):
+    """
+    A class to represent an abstractive seq2seq text summarization model with pointer-generator network and coverage. It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and Transformers libraries.
+    """
+
+    def __init__(self, config: ModelConfig):
         super().__init__()
-        self.vocab_size = vocab_size
-        self.use_coverage = use_coverage
-        self.beam_size = beam_size
-        self.min_dec_steps = min_dec_steps
-        self.embedding = SharedEmbedding(embedding_dim, vocab_size, pad_token_id)
-        self.encoder = PointerGeneratorEncoder(hidden_dim, self.embedding)
-        self.decoder = PointerGeneratorDecoder(hidden_dim, vocab_size, self.embedding, False, use_coverage)
+        self.vocab_size = config.vocab_size
+        self.use_coverage = config.use_coverage
+        self.beam_size = config.beam_size
+        self.min_dec_steps = config.min_dec_steps
+        self.embedding = SharedEmbedding(config.embedding_dim, config.vocab_size, config.pad_token_id)
+        self.encoder = PointerGeneratorEncoder(config.hidden_dim, self.embedding)
+        self.decoder = PointerGeneratorDecoder(
+            config.hidden_dim, config.vocab_size, self.embedding, False, config.use_coverage
+        )
 
     def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
         encoder_input_ids = inputs["encoder_input_ids"]
@@ -346,38 +356,26 @@ class PointerGeneratorSummarizatonModel(nn.Module):
 
         batch_size, max_dec_seq_len = vocab_dists.shape[:2]
         extended_vocab_size = self.vocab_size + max_article_oovs
-        extra_zeros = pt.zeros(batch_size, max_dec_seq_len, max_article_oovs)
+        extra_zeros = pt.zeros(batch_size, max_dec_seq_len, max_article_oovs).cuda()
         vocab_dists_extended = pt.concat([vocab_dists, extra_zeros], dim=2)
 
         index = pt.stack(max_dec_seq_len * [encoder_inputs_extvoc.long()], dim=1)
-        projection_base = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size)
+        projection_base = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size).cuda()
         attn_dists_projected = projection_base.scatter_add(2, index, attn_dists)
         final_dists = vocab_dists_extended + attn_dists_projected
         return final_dists
 
 
-DEFAULT_MODEL = PointerGeneratorSummarizatonModel(256, 128, 4, 32, 50000, 0)
-
-
 class AbstractiveSummarizationModel(LightningModule):
-    """
-    A class to represent an abstractive seq2seq model for text summarization with pointer-generator network and coverage. It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and Transformers libraries.
-    """
+    """Pytorch-Lightning encapsulation of Pointer-generator summarization model."""
 
-    def __init__(
-        self,
-        model: PointerGeneratorSummarizatonModel,
-        learning_rate: float = 0.15,
-        adagrad_init_acc: float = 0.1,
-        cov_loss_weight: float = 1.0,
-        max_grad_norm: int = 2,
-    ):
+    def __init__(self, config: ModelConfig):
         super().__init__()
-        self.learning_rate = learning_rate
-        self.model = model
-        self.adagrad_init_acc = adagrad_init_acc
-        self.cov_loss_weight = cov_loss_weight
-        self.max_grad_norm = max_grad_norm
+        self.learning_rate = config.learning_rate
+        self.model = PointerGeneratorSummarizationModel(config)
+        self.adagrad_init_acc = config.adagrad_init_acc
+        self.cov_loss_weight = config.cov_loss_weight
+        self.max_grad_norm = config.max_grad_norm
         self.save_hyperparameters(ignore=["model"])
         self.metrics = {}
 
@@ -413,27 +411,43 @@ class AbstractiveSummarizationModel(LightningModule):
     def training_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
-        loss = self._calc_primary_loss(final_dists, decoder_target_ids, decoder_padding_mask)
+        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
             coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
 
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log(
+            "train_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
+        )
         return loss
 
     def validation_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
-        loss = self.calc_primary_loss(final_dists, decoder_target_ids, decoder_padding_mask)
+        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
-            coverage_loss = self.calc_coverage_loss(attn_dists, decoder_padding_mask)
+            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
-        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log(
+            "val_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
+        )
         return loss
 
     def configure_optimizers(self) -> Any:
         optimizer = pt.optim.Adagrad(
-            self.parameters, self.learning_rate, initial_accumulator_value=self.adagrad_init_acc
+            self.parameters(), self.learning_rate, initial_accumulator_value=self.adagrad_init_acc
         )
         return optimizer
 
@@ -444,19 +458,10 @@ def main():
     datamodule.prepare_data()
     datamodule.setup()
 
-    tokenizer = SummarizationTokenizerFast.from_pretrained(TOKENIZER_DIR)
-    # max_grad_norm: float = 2.0,
-    model = PointerGeneratorSummarizatonModel(
-        hidden_dim=256,
-        embedding_dim=128,
-        vocab_size=tokenizer.backend_tokenizer.get_vocab_size(),
-        beam_size=4,
-        min_dec_steps=35,
-        pad_token_id=tokenizer.pad_token_id,
-    )
-    module = AbstractiveSummarizationModel(model)
+    config = ModelConfig()
+    module = AbstractiveSummarizationModel(config)
     for step, batch in enumerate(datamodule.train_dataloader()):
-        final_dists, attn_dists = model(batch)
+        final_dists, _ = module.model(batch)
         print(final_dists.shape)
         if step == 9:
             break

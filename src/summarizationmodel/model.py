@@ -284,7 +284,7 @@ class PointerGeneratorDecoder(nn.Module):
             attn_dists.append(attn_dist)
             pgens.append(self.pgen(x, state.concatenated, context))
             vocab_dists.append(self.vocab_dist(concatenated_lstm_output))
-        print([vocab_dists[i].shape for i in range(len(vocab_dists))])
+
         vocab_dists = pt.stack(vocab_dists, dim=1)
         attn_dists = pt.stack(attn_dists, dim=1)
         pgens = pt.stack(pgens, dim=1)
@@ -310,6 +310,8 @@ class PointerGeneratorSummarizationModel(nn.Module):
         )
 
     def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
+        pt.cuda.empty_cache()
+
         encoder_input_ids = inputs["encoder_input_ids"]
         encoder_padding_mask = inputs["encoder_padding_mask"]
         decoder_input_ids = inputs["decoder_input_ids"]

@@ -8,7 +8,7 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 from summarizationmodel.datamodule.datamodule import SummarizationDataModule
 from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
 from summarizationmodel.config import TOKENIZER_DIR
-from summarizationmodel.utils import timeit, is_finite
+from summarizationmodel.utils import timeit
 
 
 class LSTMState(NamedTuple):
@@ -356,6 +356,9 @@ class PointerGeneratorSummarizatonModel(nn.Module):
         return final_dists
 
 
+DEFAULT_MODEL = PointerGeneratorSummarizatonModel(256, 128, 4, 32, 50000, 0)
+
+
 class AbstractiveSummarizationModel(LightningModule):
     """
     A class to represent an abstractive seq2seq model for text summarization with pointer-generator network and coverage. It's inspired by the paper https://arxiv.org/abs/1704.04368 and implementation by Abigail See, rewritten from TF1.0 into PyTorch and Transformers libraries.
@@ -451,7 +454,7 @@ def main():
         min_dec_steps=35,
         pad_token_id=tokenizer.pad_token_id,
     )
-    pl_module = AbstractiveSummarizationModel(model)
+    module = AbstractiveSummarizationModel(model)
     for step, batch in enumerate(datamodule.train_dataloader()):
         final_dists, attn_dists = model(batch)
         print(final_dists.shape)

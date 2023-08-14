@@ -26,7 +26,8 @@ setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
-            "pretrain_tokenizer=summarization.train_tokenizer:main",
+            "train_tokenizer=summarization.entrypoints.train_tokenizer:main",
+            "train_model=summarization.entrypoints.train_model:main",
         ]
     },
 )

@@ -56,6 +56,6 @@ model:
 data:
   batch_size: 16
   dataset_version: 3.0.0
-  tokenizer_dir: /home/miro/python/pointer-generator/src/summarizationmodel/trained_tokenizer
+  tokenizer_dir: /home/miro/python/pointer-generator/src/summarization/trained_tokenizer
   data_dir: /home/miro/python/pointer-generator/data
 ckpt_path: null

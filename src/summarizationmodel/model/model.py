@@ -1,13 +1,12 @@
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional
-from pathlib import Path
 
 import torch as pt
 from lightning.pytorch import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn
 
-from summarizationmodel.datamodule.config import VOCAB_SIZE, TOKENIZER_DIR, DATA_DIR
+from summarizationmodel.datamodule.config import VOCAB_SIZE
 from summarizationmodel.datamodule.datamodule import SummarizationDataModule
 from summarizationmodel.utils import timeit
 

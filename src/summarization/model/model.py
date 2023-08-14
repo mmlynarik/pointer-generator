@@ -6,9 +6,9 @@ from lightning.pytorch import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn
 
-from summarizationmodel.datamodule.config import VOCAB_SIZE
-from summarizationmodel.datamodule.datamodule import SummarizationDataModule
-from summarizationmodel.utils import timeit
+from summarization.datamodule.config import VOCAB_SIZE
+from summarization.datamodule.datamodule import SummarizationDataModule
+from summarization.utils import timeit
 
 
 # Model config from research paper

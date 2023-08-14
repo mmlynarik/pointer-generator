@@ -1,7 +1,7 @@
 from lightning.pytorch.cli import LightningCLI
 
-from summarizationmodel.datamodule.datamodule import SummarizationDataModule
-from summarizationmodel.model.model import AbstractiveSummarizationModel
+from summarization.datamodule.datamodule import SummarizationDataModule
+from summarization.model.model import AbstractiveSummarizationModel
 
 
 def main():

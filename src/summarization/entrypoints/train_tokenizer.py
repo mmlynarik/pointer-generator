@@ -4,7 +4,7 @@ from datasets import Dataset
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from summarizationmodel.datamodule.config import (
+from summarization.datamodule.config import (
     END_TOKEN,
     PAD_TOKEN,
     START_TOKEN,
@@ -13,7 +13,7 @@ from summarizationmodel.datamodule.config import (
     VOCAB_SIZE,
     MODEL_MAX_LENGTH,
 )
-from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
+from summarization.datamodule.dataset import load_cnn_dailymail_dataset
 
 
 def train_base_tokenizer_on_dataset(train_dataset: Dataset, tokenizer_dir: Path):

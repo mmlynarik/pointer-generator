@@ -9,9 +9,9 @@ from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
 
-from summarizationmodel.datamodule.config import DATA_DIR, TOKENIZER_DIR
-from summarizationmodel.datamodule.dataset import load_cnn_dailymail_dataset
-from summarizationmodel.datamodule.tokenizer import SummarizationTokenizerFast
+from summarization.datamodule.config import DATA_DIR, TOKENIZER_DIR
+from summarization.datamodule.dataset import load_cnn_dailymail_dataset
+from summarization.datamodule.tokenizer import SummarizationTokenizerFast
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())

@@ -5,7 +5,7 @@ from typing import Callable, Sequence, Union
 from tokenizers import Tokenizer, processors
 from transformers import BatchEncoding, PreTrainedTokenizerFast
 
-from summarizationmodel.datamodule.config import (
+from summarization.datamodule.config import (
     END_TOKEN,
     MAX_DECODER_STEPS,
     MAX_ENCODER_STEPS,

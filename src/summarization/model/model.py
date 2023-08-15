@@ -11,7 +11,7 @@ from summarization.datamodule.datamodule import SummarizationDataModule
 from summarization.utils import timeit
 
 
-# Model config from research paper
+# Model and trainer config from research paper
 @dataclass
 class ModelConfig:
     hidden_dim: int = 256
@@ -377,7 +377,7 @@ class AbstractiveSummarizationModel(LightningModule):
         self.adagrad_init_acc = config.adagrad_init_acc
         self.cov_loss_weight = config.cov_loss_weight
         self.max_grad_norm = config.max_grad_norm
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()
         self.metrics = {}
 
     def forward(self, batch: pt.Tensor) -> pt.Tensor:
@@ -437,6 +437,24 @@ class AbstractiveSummarizationModel(LightningModule):
             loss += self.cov_loss_weight * coverage_loss
         self.log(
             "val_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
+        )
+        return loss
+
+    def test_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
+        decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
+        final_dists, attn_dists = self.model(batch)
+        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
+        if self.model.use_coverage:
+            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
+            loss += self.cov_loss_weight * coverage_loss
+        self.log(
+            "test_loss",
             loss,
             on_step=True,
             on_epoch=True,

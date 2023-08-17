@@ -5,6 +5,7 @@ import torch as pt
 from lightning.pytorch import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn
+from torch.nn.functional import nll_loss
 
 from summarization.datamodule.config import VOCAB_SIZE
 from summarization.datamodule.datamodule import SummarizationDataModule
@@ -373,6 +374,7 @@ class AbstractiveSummarizationModel(LightningModule):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.learning_rate = config.learning_rate
+        self.pad_token_id = config.pad_token_id
         self.model = PointerGeneratorSummarizationModel(config)
         self.adagrad_init_acc = config.adagrad_init_acc
         self.cov_loss_weight = config.cov_loss_weight
@@ -385,10 +387,10 @@ class AbstractiveSummarizationModel(LightningModule):
         return final_dists
 
     def _calc_primary_loss(self, final_dists: pt.Tensor, decoder_target_ids: pt.Tensor) -> pt.Tensor:
-        """Calculate the primary loss of the model from final token distributions and targets."""
+        """Calculate the model primary loss for batch from final token distributions and targets."""
         return pt.stack(
             [
-                pt.nn.functional.nll_loss(pt.log(example_probs), example_targets.long(), ignore_index=0)
+                nll_loss(pt.log(example_probs), example_targets.long(), ignore_index=self.pad_token_id)
                 for example_probs, example_targets in zip(final_dists, decoder_target_ids)
             ]
         ).mean()
@@ -412,57 +414,28 @@ class AbstractiveSummarizationModel(LightningModule):
     def training_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
+        bs = len(final_dists)  # batch_size to fix dataloader warning arising from strings in batch
         loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
             coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
 
-        self.log(
-            "train_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
-        )
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=bs)
         return loss
 
     def validation_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
+        bs = len(final_dists)  # batch_size to fix dataloader warning arising from strings in batch
         loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
             coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
-        self.log(
-            "val_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
-        )
+        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=bs)
         return loss
 
     def test_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
-        decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
-        final_dists, attn_dists = self.model(batch)
-        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
-        if self.model.use_coverage:
-            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
-            loss += self.cov_loss_weight * coverage_loss
-        self.log(
-            "test_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=len(final_dists),  # to fix dataloader warning arising from strings in batch
-        )
-        return loss
+        pass
 
     def configure_optimizers(self) -> Any:
         optimizer = pt.optim.Adagrad(

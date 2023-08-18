@@ -443,6 +443,9 @@ class AbstractiveSummarizationModel(LightningModule):
         )
         return optimizer
 
+    def on_epoch_start(self):
+        print('\n')
+
 
 @timeit
 def main():

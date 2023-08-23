@@ -178,7 +178,7 @@ class BahdanauAttn(nn.Module):
         masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
-        context = attn_dist * encoder_outputs
+        context = attn_dist * encoder_outputs  # broadcasting multiplication
         context = context.sum(dim=1)  # B-2H
 
         return context, attn_dist.squeeze(), None

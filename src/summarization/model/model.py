@@ -26,6 +26,7 @@ class ModelConfig:
     adagrad_init_acc: float = 0.1
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
+    device: pt.device = pt.device("cuda")
 
 
 class LSTMState(NamedTuple):
@@ -82,17 +83,17 @@ class PointerGeneratorEncoder(nn.Module):
         reduced_last_state: Last LSTMState with attributes of shape [batch_size, hidden_dim]
     """
 
-    def __init__(self, hidden_dim: int, embedding: SharedEmbedding):
+    def __init__(self, config: ModelConfig, embedding: SharedEmbedding):
         super().__init__()
         self.embedding = embedding
         self.lstm = nn.LSTM(
             input_size=embedding.embedding_dim,
-            hidden_size=hidden_dim,
+            hidden_size=config.hidden_dim,
             num_layers=1,
             bidirectional=True,
             batch_first=True,
         )
-        self.state_reducer = PointerGeneratorStateReducer(hidden_dim)
+        self.state_reducer = PointerGeneratorStateReducer(config.hidden_dim)
 
     def forward(self, input_ids: pt.Tensor, padding_mask: pt.Tensor) -> tuple[pt.Tensor, LSTMState]:
         embeddings = self.embedding(input_ids)
@@ -234,22 +235,25 @@ class PointerGeneratorDecoder(nn.Module):
 
     def __init__(
         self,
-        hidden_dim: int,
-        vocab_size: int,
+        config: ModelConfig,
         embedding: SharedEmbedding,
         initial_state_attention: bool = False,
-        use_coverage: bool = False,
     ):
         super().__init__()
         self.embedding = embedding
         self.initial_state_attention = initial_state_attention
+        self.device = config.device
 
-        self.reducer = nn.Linear(2 * hidden_dim + embedding.embedding_dim, hidden_dim)
-        self.lstm_cell = nn.LSTMCell(hidden_dim, hidden_dim)
-        self.attention = BahdanauAttnWithCoverage(hidden_dim) if use_coverage else BahdanauAttn(hidden_dim)
+        self.reducer = nn.Linear(2 * config.hidden_dim + embedding.embedding_dim, config.hidden_dim)
+        self.lstm_cell = nn.LSTMCell(config.hidden_dim, config.hidden_dim)
+        self.attention = (
+            BahdanauAttnWithCoverage(config.hidden_dim)
+            if config.use_coverage
+            else BahdanauAttn(config.hidden_dim)
+        )
 
-        self.pgen = GenerationProbability(hidden_dim)
-        self.vocab_dist = VocabularyDistribution(hidden_dim, vocab_size)
+        self.pgen = GenerationProbability(config.hidden_dim)
+        self.vocab_dist = VocabularyDistribution(config.hidden_dim, config.vocab_size)
 
     def forward(
         self,
@@ -263,7 +267,7 @@ class PointerGeneratorDecoder(nn.Module):
 
         state: LSTMState = initial_state
         coverage = prev_coverage
-        context = pt.zeros(encoder_outputs.shape[::2]).cuda()
+        context = pt.zeros(encoder_outputs.shape[::2], device=self.device)
 
         if self.initial_state_attention:  # true in decode mode
             context, _, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
@@ -303,11 +307,12 @@ class PointerGeneratorSummarizationModel(nn.Module):
         self.use_coverage = config.use_coverage
         self.beam_size = config.beam_size
         self.min_dec_steps = config.min_dec_steps
-        self.embedding = SharedEmbedding(config.embedding_dim, config.vocab_size, config.pad_token_id)
-        self.encoder = PointerGeneratorEncoder(config.hidden_dim, self.embedding)
-        self.decoder = PointerGeneratorDecoder(
-            config.hidden_dim, config.vocab_size, self.embedding, False, config.use_coverage
-        )
+        self.device = config.device
+
+        embedding = SharedEmbedding(config)
+        self.encoder = PointerGeneratorEncoder(config, embedding)
+        self.decoder = PointerGeneratorDecoder(config, embedding, False)
+        pt.set_float32_matmul_precision("medium")
 
     def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
         pt.cuda.empty_cache()
@@ -358,11 +363,11 @@ class PointerGeneratorSummarizationModel(nn.Module):
 
         batch_size, max_dec_seq_len = vocab_dists.shape[:2]
         extended_vocab_size = self.vocab_size + max_article_oovs
-        extra_zeros = pt.zeros(batch_size, max_dec_seq_len, max_article_oovs).cuda()
+        extra_zeros = pt.zeros(batch_size, max_dec_seq_len, max_article_oovs, device=self.device)
         vocab_dists_extended = pt.concat([vocab_dists, extra_zeros], dim=2)
 
         index = pt.stack(max_dec_seq_len * [encoder_inputs_extvoc.long()], dim=1)
-        projection_base = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size).cuda()
+        projection_base = pt.zeros(batch_size, max_dec_seq_len, extended_vocab_size, device=self.device)
         attn_dists_projected = projection_base.scatter_add(2, index, attn_dists)
         final_dists = vocab_dists_extended + attn_dists_projected
         return final_dists
@@ -414,7 +419,7 @@ class AbstractiveSummarizationModel(LightningModule):
     def training_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
-        bs = len(final_dists)  # batch_size to fix dataloader warning arising from strings in batch
+        bs = len(final_dists)  # batch_size to fix dataloader warning arising from str dtype in batch
         loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
             coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
@@ -426,7 +431,7 @@ class AbstractiveSummarizationModel(LightningModule):
     def validation_step(self, batch: dict[str, Any], _: int) -> STEP_OUTPUT:
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
-        bs = len(final_dists)  # batch_size to fix dataloader warning arising from strings in batch
+        bs = len(final_dists)  # batch_size to fix dataloader warning arising from str dtype in batch
         loss = self._calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
             coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
@@ -444,7 +449,7 @@ class AbstractiveSummarizationModel(LightningModule):
         return optimizer
 
     def on_epoch_start(self):
-        print('\n')
+        print(f"Global step: {self.trainer.global_step}\n")
 
 
 @timeit

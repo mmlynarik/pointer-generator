@@ -99,6 +99,7 @@ class SummarizationDataModule(LightningDataModule):
             shuffle=True,
             collate_fn=self.data_collator,
             num_workers=4,
+            pin_memory=True,
         )
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
@@ -108,6 +109,7 @@ class SummarizationDataModule(LightningDataModule):
             shuffle=False,
             collate_fn=self.data_collator,
             num_workers=4,
+            pin_memory=True,
         )
 
     def test_dataloader(self) -> EVAL_DATALOADERS:

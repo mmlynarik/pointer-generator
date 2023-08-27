@@ -26,7 +26,7 @@ class ModelConfig:
     adagrad_init_acc: float = 0.1
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
-    device: pt.device = pt.device("cuda")
+    device: pt.device = None
 
 
 class LSTMState(NamedTuple):
@@ -45,9 +45,9 @@ class LSTMState(NamedTuple):
 
 
 class SharedEmbedding(nn.Module):
-    def __init__(self, embedding_dim: int, vocab_size: int, pad_token_id: int):
+    def __init__(self, config: ModelConfig):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, pad_token_id)
+        self.embedding = nn.Embedding(config.vocab_size, config.embedding_dim, config.pad_token_id)
 
     def forward(self, inputs: pt.Tensor) -> pt.Tensor:
         return self.embedding(inputs)
@@ -380,6 +380,7 @@ class AbstractiveSummarizationModel(LightningModule):
         super().__init__()
         self.learning_rate = config.learning_rate
         self.pad_token_id = config.pad_token_id
+        config.device = pt.device("cuda")
         self.model = PointerGeneratorSummarizationModel(config)
         self.adagrad_init_acc = config.adagrad_init_acc
         self.cov_loss_weight = config.cov_loss_weight

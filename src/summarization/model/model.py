@@ -26,7 +26,7 @@ class ModelConfig:
     adagrad_init_acc: float = 0.1
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
-    device: pt.device = None
+    device: str = "cuda"
 
 
 class LSTMState(NamedTuple):
@@ -380,7 +380,6 @@ class AbstractiveSummarizationModel(LightningModule):
         super().__init__()
         self.learning_rate = config.learning_rate
         self.pad_token_id = config.pad_token_id
-        config.device = pt.device("cuda")
         self.model = PointerGeneratorSummarizationModel(config)
         self.adagrad_init_acc = config.adagrad_init_acc
         self.cov_loss_weight = config.cov_loss_weight
@@ -459,7 +458,7 @@ def main():
     datamodule.prepare_data()
     datamodule.setup()
 
-    config = ModelConfig()
+    config = ModelConfig(device="cpu")
     module = AbstractiveSummarizationModel(config)
     for step, batch in enumerate(datamodule.train_dataloader()):
         final_dists, _ = module.model(batch)

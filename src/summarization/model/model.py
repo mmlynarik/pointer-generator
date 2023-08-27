@@ -26,6 +26,7 @@ class ModelConfig:
     adagrad_init_acc: float = 0.1
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
+    trunc_norm_init_std: float = 1e-4
     device: str = "cuda"
 
 
@@ -186,23 +187,23 @@ class BahdanauAttn(nn.Module):
 
 
 class VocabularyDistribution(nn.Module):
-    """Reduce concatenated LSTM output and then apply final transformation to vocabulary distribution."""
+    """Reduce concatenated LSTM output and then apply output projection to vocabulary distribution."""
 
     def __init__(self, hidden_dim: int, vocab_size: int):
         super().__init__()
         self.reducer = nn.Linear(3 * hidden_dim, hidden_dim)
-        self.output = nn.Linear(hidden_dim, vocab_size)
+        self.output_projection = nn.Linear(hidden_dim, vocab_size)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, inputs: pt.Tensor) -> pt.Tensor:
         x = self.reducer(inputs)
-        x = self.output(x)
+        x = self.output_projection(x)
         x = self.softmax(x)
         return x
 
 
 class GenerationProbability(nn.Module):
-    """Calculate generation probability from decoder state, input and and context vectors."""
+    """Calculate generation probability from decoder state, decoder input and and context vector."""
 
     def __init__(self, hidden_dim: int):
         super().__init__()
@@ -244,7 +245,7 @@ class PointerGeneratorDecoder(nn.Module):
         self.initial_state_attention = initial_state_attention
         self.device = config.device
 
-        self.reducer = nn.Linear(2 * config.hidden_dim + embedding.embedding_dim, config.hidden_dim)
+        self.input_reducer = nn.Linear(2 * config.hidden_dim + embedding.embedding_dim, config.hidden_dim)
         self.lstm_cell = nn.LSTMCell(config.hidden_dim, config.hidden_dim)
         self.attention = (
             BahdanauAttnWithCoverage(config.hidden_dim)
@@ -275,7 +276,7 @@ class PointerGeneratorDecoder(nn.Module):
         embeddings = self.embedding(input_ids)
         for step, step_embeddings in enumerate(embeddings.transpose(0, 1)):
             concatenated_input = pt.cat([step_embeddings, context], dim=1)
-            x = self.reducer(concatenated_input)
+            x = self.input_reducer(concatenated_input)
             state: tuple[pt.Tensor, pt.Tensor] = self.lstm_cell(x, state)
             state = LSTMState.from_tuple(state)
 
@@ -308,11 +309,12 @@ class PointerGeneratorSummarizationModel(nn.Module):
         self.beam_size = config.beam_size
         self.min_dec_steps = config.min_dec_steps
         self.device = config.device
+        self.trunc_norm_init_std = config.trunc_norm_init_std
 
-        embedding = SharedEmbedding(config)
-        self.encoder = PointerGeneratorEncoder(config, embedding)
-        self.decoder = PointerGeneratorDecoder(config, embedding, False)
-        pt.set_float32_matmul_precision("medium")
+        self.embedding = SharedEmbedding(config)
+        self.encoder = PointerGeneratorEncoder(config, self.embedding)
+        self.decoder = PointerGeneratorDecoder(config, self.embedding, False)
+        self.init_weights()
 
     def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
         pt.cuda.empty_cache()
@@ -332,6 +334,24 @@ class PointerGeneratorSummarizationModel(nn.Module):
             vocab_dists, attn_dists, pgens, max_article_oovs, encoder_inputs_extvoc
         )
         return final_dists, attn_dists
+
+    def init_weights(self):
+        """Tensorflow-like initialization of LSTM layer. Dense layers initialization inspired by paper."""
+        for name, param in self.named_parameters():
+            if "lstm" in name:
+                if "weight_ih" in name:
+                    nn.init.xavier_uniform_(param.data)
+                elif "weight_hh" in name:
+                    nn.init.orthogonal_(param.data)
+                elif "bias_ih" in name:
+                    nn.init.constant_(param.data, 0)
+                    # Set forget-gate bias to 1
+                    n = param.size(0)
+                    param.data[(n // 4) : (n // 2)].fill_(1)
+                elif "bias_hh" in name:
+                    nn.init.constant_(param.data, 0)
+            elif "embedding" in name or "output_projection" in name or "state_reducer" in name:
+                nn.init.trunc_normal_(param.data, std=self.trunc_norm_init_std)
 
     def get_max_article_oovs(self, oovs: list[list[int]]) -> int:
         return max(len(example_oovs) for example_oovs in oovs)

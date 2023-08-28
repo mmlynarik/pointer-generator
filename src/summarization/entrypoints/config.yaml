@@ -6,7 +6,14 @@ trainer:
   devices: 1
   num_nodes: 1
   precision: 32-true
-  logger: null
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      name: null
+      save_dir: ./wandb
+      offline: true
+      project: pointer-generator
+      version: null
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:

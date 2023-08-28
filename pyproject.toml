@@ -19,7 +19,8 @@ sentencepiece = "0.1.99"
 apex = "0.9.10.dev0"
 jsonargparse = {extras = ["signatures"], version = "4.23.1"}
 tensorboard = "2.14.0"
-evaluate = "^0.4.0"
+evaluate = "0.4.0"
+wandb = "0.15.8"
 
 [tool.poetry.group.dev.dependencies]
 pycodestyle = "2.10.0"

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Literal
 
 import torch as pt
 from lightning.pytorch import LightningModule
@@ -12,9 +12,13 @@ from summarization.datamodule.datamodule import SummarizationDataModule
 from summarization.utils import timeit
 
 
-# Model and trainer config from research paper
+Device = Literal["cuda", "cpu"]
+
+
 @dataclass
 class ModelConfig:
+    """Config values are taken from the research paper."""
+
     hidden_dim: int = 256
     embedding_dim: int = 128
     beam_size: int = 4
@@ -27,7 +31,7 @@ class ModelConfig:
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
     trunc_norm_init_std: float = 1e-4
-    device: str = "cuda"
+    device: Device = "cuda"
 
 
 class LSTMState(NamedTuple):
@@ -77,10 +81,10 @@ class PointerGeneratorEncoder(nn.Module):
     """Single-layer bi-directional LSTM encoder with PackedSequence inputs to LSTM instead of dynamic padding
 
     Inputs:
-        input_ids: Article token ids of shape [batch_size, max_enc_steps]
-        padding_mask: Boolean mask of shape [batch_size, max_enc_steps]
+        input_ids: Article token ids of shape [batch_size, max_enc_seq_len]
+        padding_mask: Boolean mask of shape [batch_size, max_enc_seq_len]
     Outputs:
-        outputs: Tensor of shape [batch_size, max_enc_steps, 2 * hidden_dim]
+        outputs: Tensor of shape [batch_size, max_enc_seq_len, 2 * hidden_dim]
         reduced_last_state: Last LSTMState with attributes of shape [batch_size, hidden_dim]
     """
 
@@ -100,7 +104,9 @@ class PointerGeneratorEncoder(nn.Module):
         embeddings = self.embedding(input_ids)
         lengths = self.get_input_lengths(padding_mask)
 
-        packed_embeddings = nn.utils.rnn.pack_padded_sequence(embeddings, lengths.cpu(), True, False)
+        packed_embeddings = nn.utils.rnn.pack_padded_sequence(
+            embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
         packed_outputs, (hidden_state, cell_state) = self.lstm(packed_embeddings)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(packed_outputs, batch_first=True)
 
@@ -112,8 +118,8 @@ class PointerGeneratorEncoder(nn.Module):
         return padding_mask.sum(dim=1)
 
     def get_lstm_state_from_components(self, hidden_state: pt.Tensor, cell_state: pt.Tensor) -> LSTMState:
-        hidden_state = pt.cat([direction for direction in hidden_state], axis=1).squeeze()
-        cell_state = pt.cat([direction for direction in cell_state], axis=1).squeeze()
+        hidden_state = pt.cat([direction for direction in hidden_state], axis=1)
+        cell_state = pt.cat([direction for direction in cell_state], axis=1)
         return LSTMState(hidden_state, cell_state)
 
 
@@ -376,7 +382,7 @@ class PointerGeneratorSummarizationModel(nn.Module):
             [batch_size, max_enc_seq_len].
 
         Returns:
-        Final_dists: The final distributions of shape [batch_size, max_dec_steps, extended_vocab_size].
+            Final_dists: The final distributions of shape [batch_size, max_dec_steps, extended_vocab_size].
         """
         vocab_dists = pgens * vocab_dists
         attn_dists = (1 - pgens) * attn_dists

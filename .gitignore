@@ -3,4 +3,4 @@
 **/*.egg-info
 data/
 lightning_logs
-wandb
+wandb/

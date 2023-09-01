@@ -123,7 +123,7 @@ class SummarizationDataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    dm = SummarizationDataModule()
+    dm = SummarizationDataModule(batch_size=16)
     dm.prepare_data()
     dm.setup()
 

@@ -9,11 +9,11 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      name: null
       save_dir: ./wandb
-      offline: false
       project: pointer-generator
-      version: null
+      log_model: all
+      save_code: true
+      job_type: training
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:

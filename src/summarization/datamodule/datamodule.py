@@ -105,7 +105,7 @@ class SummarizationDataModule(LightningDataModule):
     def val_dataloader(self) -> EVAL_DATALOADERS:
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
+            batch_size=2 * self.batch_size,
             shuffle=False,
             collate_fn=self.data_collator,
             num_workers=4,
@@ -115,10 +115,11 @@ class SummarizationDataModule(LightningDataModule):
     def test_dataloader(self) -> EVAL_DATALOADERS:
         return DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
+            batch_size=2 * self.batch_size,
             shuffle=False,
             collate_fn=self.data_collator,
             num_workers=4,
+            pin_memory=True,
         )
 
 

@@ -474,9 +474,6 @@ class AbstractiveSummarizationModel(LightningModule):
         )
         return optimizer
 
-    def on_epoch_start(self):
-        print(f"Global step: {self.trainer.global_step}\n")
-
 
 @timeit
 def main():

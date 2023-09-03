@@ -474,6 +474,9 @@ class AbstractiveSummarizationModel(LightningModule):
         )
         return optimizer
 
+    def on_fit_start(self) -> None:
+        self.logger.experiment.log_code(root=".", include_fn=lambda path: path.endswith(".py"))
+
 
 @timeit
 def main():

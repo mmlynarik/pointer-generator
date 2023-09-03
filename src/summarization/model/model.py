@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, Literal
 
@@ -34,6 +35,11 @@ class ModelConfig:
     max_grad_norm: int = 2
     trunc_norm_init_std: float = 1e-4
     device: Device = "cuda"
+
+
+def remove_config_yaml():
+    """If not deleted, it would interfere with next runs."""
+    os.remove("config.yaml")
 
 
 class LSTMState(NamedTuple):
@@ -483,6 +489,10 @@ class AbstractiveSummarizationModel(LightningModule):
             name=f"source-code-{logger.experiment.id}",
             include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml"),
         )
+
+    def on_validation_start(self) -> None:
+        """This will affect both fit and validate stage as validation is run also during training."""
+        remove_config_yaml()
 
 
 @timeit

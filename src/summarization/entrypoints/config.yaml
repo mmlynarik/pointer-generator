@@ -10,7 +10,6 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       name: pointer-generator
-      save_dir: ./lightning_logs
       project: email-ad-summarization
       log_model: all
       job_type: training

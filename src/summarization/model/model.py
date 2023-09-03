@@ -487,7 +487,7 @@ class AbstractiveSummarizationModel(LightningModule):
         logger.experiment.log_code(
             root="./src",
             name=f"source-code-{logger.experiment.id}",
-            include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml"),
+            include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml") or path.endswith(".json"),
         )
 
     def on_validation_start(self) -> None:

@@ -5,3 +5,4 @@
 data/
 lightning_logs
 wandb/
+.env

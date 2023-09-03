@@ -7,7 +7,7 @@ from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn
 from torch.nn.functional import nll_loss
-from wandb import Artifact
+
 
 from summarization.datamodule.config import VOCAB_SIZE
 from summarization.datamodule.datamodule import SummarizationDataModule
@@ -478,13 +478,11 @@ class AbstractiveSummarizationModel(LightningModule):
 
     def on_fit_start(self) -> None:
         logger: WandbLogger = self.logger
-        artifact: Artifact = logger.experiment.log_code(
+        logger.experiment.log_code(
             root="./src",
             name=f"source-code-{logger.experiment.id}",
             include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml"),
         )
-        artifact = logger.experiment.log_artifact(artifact, type="code")
-        artifact = artifact.wait()
 
 
 @timeit

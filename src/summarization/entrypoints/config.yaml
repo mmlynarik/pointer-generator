@@ -10,10 +10,9 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       name: pointer-generator
-      save_dir: ./wandb
+      save_dir: ./lightning_logs
       project: email-ad-summarization
       log_model: all
-      save_code: true
       job_type: training
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint

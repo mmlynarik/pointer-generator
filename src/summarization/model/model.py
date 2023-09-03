@@ -491,7 +491,7 @@ class AbstractiveSummarizationModel(LightningModule):
         )
 
     def on_validation_start(self) -> None:
-        """This will affect both fit and validate stage as validation is run also during training."""
+        """This will affect both fit and validation stage as validation is run also during training."""
         remove_config_yaml()
 
 

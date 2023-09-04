@@ -39,7 +39,8 @@ class ModelConfig:
 
 def remove_config_yaml():
     """If not deleted, it would interfere with next runs."""
-    os.remove("config.yaml")
+    if os.path.exists("config.yaml"):
+        os.remove("config.yaml")
 
 
 class LSTMState(NamedTuple):

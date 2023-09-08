@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-ROOT_DIR = Path().resolve()
+ROOT_DIR = Path.cwd()
 DATA_DIR = ROOT_DIR / "data"
 TOKENIZER_DIR = ROOT_DIR / "src" / "summarization" / "trained_tokenizer"
 

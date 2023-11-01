@@ -20,7 +20,7 @@ Device = Literal["cuda", "cpu"]
 
 @dataclass
 class ModelConfig:
-    """Config values are taken from the research paper."""
+    """Default config values are taken from the research paper."""
 
     hidden_dim: int = 256
     embedding_dim: int = 128
@@ -355,6 +355,7 @@ class PointerGeneratorSummarizationModel(nn.Module):
         for name, param in self.named_parameters():
             if "lstm" in name:
                 if "weight_ih" in name:
+
                     nn.init.xavier_uniform_(param.data)
                 elif "weight_hh" in name:
                     nn.init.orthogonal_(param.data)

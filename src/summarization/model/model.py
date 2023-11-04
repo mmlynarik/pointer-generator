@@ -87,7 +87,7 @@ class PointerGeneratorStateReducer(nn.Module):
 
 
 class PointerGeneratorEncoder(nn.Module):
-    """Single-layer bi-directional LSTM encoder with PackedSequence inputs to LSTM instead of dynamic padding
+    """Single-layer bi-directional LSTM encoder with PackedSequence inputs to LSTM simulating dynamic padding
 
     Inputs:
         input_ids: Article token ids of shape [batch_size, max_enc_seq_len]
@@ -355,7 +355,6 @@ class PointerGeneratorSummarizationModel(nn.Module):
         for name, param in self.named_parameters():
             if "lstm" in name:
                 if "weight_ih" in name:
-
                     nn.init.xavier_uniform_(param.data)
                 elif "weight_hh" in name:
                     nn.init.orthogonal_(param.data)

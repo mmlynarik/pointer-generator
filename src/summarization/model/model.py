@@ -28,12 +28,13 @@ class ModelConfig:
     min_dec_steps: int = 35
     vocab_size: int = VOCAB_SIZE
     pad_token_id: int = 0
-    use_coverage: bool = False
     learning_rate: float = 0.15
     adagrad_init_acc: float = 0.1
     cov_loss_weight: float = 1.0
     max_grad_norm: int = 2
     trunc_norm_init_std: float = 1e-4
+    use_coverage: bool = False
+    decoding: bool = False
     device: Device = "cuda"
 
 
@@ -132,45 +133,7 @@ class PointerGeneratorEncoder(nn.Module):
         return LSTMState(hidden_state, cell_state)
 
 
-class BahdanauAttnWithCoverage(nn.Module):
-    """Bahdanau attention layer used to compute context vector, attention distribution and coverage vector."""
-
-    def __init__(self, hidden_dim: int):
-        super().__init__()
-        self.Wh = nn.Linear(2 * hidden_dim, hidden_dim, bias=False)
-        self.Ws = nn.Linear(2 * hidden_dim, hidden_dim, bias=True)
-        self.v = nn.Linear(hidden_dim, 1, bias=False)
-        self.wc = nn.Linear(1, hidden_dim, bias=False)
-
-    def forward(
-        self,
-        encoder_outputs: pt.Tensor,
-        encoder_padding_mask: pt.Tensor,
-        decoder_state: LSTMState,
-        coverage: Optional[pt.Tensor] = None,
-    ):
-        coverage = pt.zeros_like(encoder_padding_mask) if coverage is None else coverage
-
-        decoder_state = decoder_state.concatenated.unsqueeze(dim=1)
-        encoder_padding_mask = encoder_padding_mask.unsqueeze(dim=2)
-        coverage = coverage.unsqueeze(dim=2)
-
-        encoder_features = self.Wh(encoder_outputs)
-        decoder_features = self.Ws(decoder_state)
-        coverage_features = self.wc(coverage)
-        attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
-
-        masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
-        attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
-
-        context = attn_dist * encoder_outputs
-        context = context.sum(dim=1)  # B-2H
-        coverage += attn_dist
-
-        return context, attn_dist.squeeze(), coverage
-
-
-class BahdanauAttn(nn.Module):
+class BahdanauAttention(nn.Module):
     """Bahdanau attention layer used to compute context vector, attention distribution and coverage vector."""
 
     def __init__(self, hidden_dim: int):
@@ -195,10 +158,49 @@ class BahdanauAttn(nn.Module):
         masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
-        context = attn_dist * encoder_outputs  # broadcasting multiplication
+        context = attn_dist * encoder_outputs  # broadcasting
         context = context.sum(dim=1)  # B-2H
+        attn_dist = attn_dist.squeeze()
 
-        return context, attn_dist.squeeze(), None
+        return context, attn_dist, None
+
+
+class BahdanauAttentionWithCoverage(nn.Module):
+    """Bahdanau attention layer used to compute context vector, attention distribution and coverage vector."""
+
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.Wh = nn.Linear(2 * hidden_dim, hidden_dim, bias=False)
+        self.Ws = nn.Linear(2 * hidden_dim, hidden_dim, bias=True)
+        self.v = nn.Linear(hidden_dim, 1, bias=False)
+        self.wc = nn.Linear(1, hidden_dim, bias=False)
+
+    def forward(
+        self,
+        encoder_outputs: pt.Tensor,
+        encoder_padding_mask: pt.Tensor,
+        decoder_state: LSTMState,
+        coverage: Optional[pt.Tensor] = None,
+    ):
+        coverage = pt.zeros_like(encoder_padding_mask) if coverage is None else coverage
+
+        decoder_state = decoder_state.concatenated.unsqueeze(dim=1)
+        encoder_padding_mask = encoder_padding_mask.unsqueeze(dim=2)
+
+        encoder_features = self.Wh(encoder_outputs)
+        decoder_features = self.Ws(decoder_state)
+        coverage_features = self.wc(coverage.unsqueeze(dim=2))
+
+        attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
+        masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))  # broadcasting
+        attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
+
+        context = attn_dist * encoder_outputs  # broadcasting
+        context = context.sum(dim=1)  # B-2H
+        attn_dist = attn_dist.squeeze()
+        coverage += attn_dist
+
+        return context, attn_dist, coverage
 
 
 class VocabularyDistribution(nn.Module):
@@ -253,23 +255,23 @@ class PointerGeneratorDecoder(nn.Module):
         self,
         config: ModelConfig,
         embedding: SharedEmbedding,
-        initial_state_attention: bool = False,
     ):
         super().__init__()
         self.embedding = embedding
-        self.initial_state_attention = initial_state_attention
+        self.decoding = config.decoding
+        self.use_coverage = config.use_coverage
         self.device = config.device
 
         self.input_reducer = nn.Linear(2 * config.hidden_dim + embedding.embedding_dim, config.hidden_dim)
         self.lstm_cell = nn.LSTMCell(config.hidden_dim, config.hidden_dim)
-        self.attention = (
-            BahdanauAttnWithCoverage(config.hidden_dim)
-            if config.use_coverage
-            else BahdanauAttn(config.hidden_dim)
-        )
+        self.attention = self.attention_class(config.hidden_dim)
 
         self.pgen = GenerationProbability(config.hidden_dim)
         self.vocab_dist = VocabularyDistribution(config.hidden_dim, config.vocab_size)
+
+    @property
+    def attention_class(self):
+        return BahdanauAttentionWithCoverage if self.use_coverage else BahdanauAttention
 
     def forward(
         self,
@@ -281,28 +283,26 @@ class PointerGeneratorDecoder(nn.Module):
     ) -> tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor, LSTMState]:
         vocab_dists, attn_dists, pgens = [], [], []
 
-        state: LSTMState = initial_state
+        state = initial_state
+        context = (
+            self.attention(encoder_outputs, encoder_mask, initial_state, prev_coverage)[0]
+            if self.decoding
+            else pt.zeros(encoder_outputs.shape[::2], device=self.device)
+        )
         coverage = prev_coverage
-        context = pt.zeros(encoder_outputs.shape[::2], device=self.device)
-
-        if self.initial_state_attention:  # true in decode mode
-            context, _, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
-
         embeddings = self.embedding(input_ids)
-        for step, step_embeddings in enumerate(embeddings.transpose(0, 1)):
-            concatenated_input = pt.cat([step_embeddings, context], dim=1)
-            x = self.input_reducer(concatenated_input)
-            state: tuple[pt.Tensor, pt.Tensor] = self.lstm_cell(x, state)
+
+        for onestep_embeddings in embeddings.transpose(0, 1):
+            concatenated_inputs = pt.cat([onestep_embeddings, context], dim=1)
+            inputs = self.input_reducer(concatenated_inputs)
+            state: tuple[pt.Tensor, pt.Tensor] = self.lstm_cell(inputs, state)
             state = LSTMState.from_tuple(state)
 
-            if step == 0 and self.initial_state_attention:
-                context, attn_dist, _ = self.attention(encoder_outputs, encoder_mask, state, coverage)
-            else:
-                context, attn_dist, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
+            context, attn_dist, coverage = self.attention(encoder_outputs, encoder_mask, state, coverage)
 
             concatenated_lstm_output = pt.cat([state.hidden_state, context], dim=1)
             attn_dists.append(attn_dist)
-            pgens.append(self.pgen(x, state.concatenated, context))
+            pgens.append(self.pgen(inputs, state.concatenated, context))
             vocab_dists.append(self.vocab_dist(concatenated_lstm_output))
 
         vocab_dists = pt.stack(vocab_dists, dim=1)
@@ -328,7 +328,7 @@ class PointerGeneratorSummarizationModel(nn.Module):
 
         self.embedding = SharedEmbedding(config)
         self.encoder = PointerGeneratorEncoder(config, self.embedding)
-        self.decoder = PointerGeneratorDecoder(config, self.embedding, False)
+        self.decoder = PointerGeneratorDecoder(config, self.embedding)
         self.init_weights()
 
     def forward(self, inputs: dict[str, Any]) -> tuple[pt.Tensor, pt.Tensor]:
@@ -337,11 +337,11 @@ class PointerGeneratorSummarizationModel(nn.Module):
         encoder_input_ids = inputs["encoder_input_ids"]
         encoder_padding_mask = inputs["encoder_padding_mask"]
         decoder_input_ids = inputs["decoder_input_ids"]
-        oovs = inputs["oovs"]
         encoder_inputs_extvoc = inputs["encoder_inputs_extvoc"]
+        oovs = inputs["oovs"]
 
         encoder_outputs, encoder_reduced_last_state = self.encoder(encoder_input_ids, encoder_padding_mask)
-        vocab_dists, attn_dists, pgens, coverage, state = self.decoder(
+        vocab_dists, attn_dists, pgens, coverage, state = self.decoder(  # coverage & state are for decoding
             decoder_input_ids, encoder_reduced_last_state, encoder_outputs, encoder_padding_mask, None
         )
         max_article_oovs = self.get_max_article_oovs(oovs)
@@ -382,7 +382,7 @@ class PointerGeneratorSummarizationModel(nn.Module):
         """Calculate final token distributions from vocab distributions and attention distributions by projecting the attn dists onto extended vocab size tensor and summing it with extended vocab dists.
 
         Args:
-            vocab_dists: The vocabulary distributions of shape [batch_size, max_dec_steps, vocab_size]
+            vocab_dists: The vocabulary distributions of shape [batch_size, max_dec_seq_len, vocab_size]
             The words are in the order they appear in the vocabulary file.
             attn_dists: The attention distributions of shape [batch_size, max_dec_seq_len, max_enc_seq_len].
             pgens: The generation probabilities of shape [batch_size, max_dec_seq_len].
@@ -391,7 +391,7 @@ class PointerGeneratorSummarizationModel(nn.Module):
             [batch_size, max_enc_seq_len].
 
         Returns:
-            Final_dists: The final distributions of shape [batch_size, max_dec_steps, extended_vocab_size].
+            Final_dists: The final distributions of shape [batch_size, max_dec_seq_len, extended_vocab_size].
         """
         vocab_dists = pgens * vocab_dists
         attn_dists = (1 - pgens) * attn_dists

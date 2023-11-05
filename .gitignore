@@ -1,9 +1,11 @@
-.venv
-.vscode
+.venv/
+.vscode/
+
+data/
+wandb/
+lightning_logs/
+email-ad-summarization/
+
 *.pyc
 **/*.egg-info
-data/
-lightning_logs
-wandb/
 .env
-email-ad-summarization/

@@ -134,46 +134,17 @@ class PointerGeneratorEncoder(nn.Module):
 
 
 class BahdanauAttention(nn.Module):
-    """Bahdanau attention layer used to compute context vector, attention distribution and coverage vector."""
+    """
+    Bahdanau attention layer used to compute context vector, attention distribution and, if use_coverage is True, also coverage vector (updating the input coverage vector). Otherwise, input and returned coverage from this layer is both None.
+    """
 
-    def __init__(self, hidden_dim: int):
-        super().__init__()
-        self.Wh = nn.Linear(2 * hidden_dim, hidden_dim, bias=False)
-        self.Ws = nn.Linear(2 * hidden_dim, hidden_dim, bias=True)
-        self.v = nn.Linear(hidden_dim, 1, bias=False)
-
-    def forward(
-        self,
-        encoder_outputs: pt.Tensor,
-        encoder_padding_mask: pt.Tensor,
-        decoder_state: LSTMState,
-        _: None,
-    ):
-        decoder_state = decoder_state.concatenated.unsqueeze(dim=1)
-        encoder_padding_mask = encoder_padding_mask.unsqueeze(dim=2)
-
-        encoder_features = self.Wh(encoder_outputs)
-        decoder_features = self.Ws(decoder_state)
-        attn_scores = self.v(pt.tanh(encoder_features + decoder_features))  # B-L-1
-        masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))
-        attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
-
-        context = attn_dist * encoder_outputs  # broadcasting
-        context = context.sum(dim=1)  # B-2H
-        attn_dist = attn_dist.squeeze()
-
-        return context, attn_dist, None
-
-
-class BahdanauAttentionWithCoverage(nn.Module):
-    """Bahdanau attention layer used to compute context vector, attention distribution and coverage vector."""
-
-    def __init__(self, hidden_dim: int):
+    def __init__(self, hidden_dim: int, use_coverage: bool):
         super().__init__()
         self.Wh = nn.Linear(2 * hidden_dim, hidden_dim, bias=False)
         self.Ws = nn.Linear(2 * hidden_dim, hidden_dim, bias=True)
         self.v = nn.Linear(hidden_dim, 1, bias=False)
         self.wc = nn.Linear(1, hidden_dim, bias=False)
+        self.use_coverage = use_coverage
 
     def forward(
         self,
@@ -182,23 +153,30 @@ class BahdanauAttentionWithCoverage(nn.Module):
         decoder_state: LSTMState,
         coverage: Optional[pt.Tensor] = None,
     ):
-        coverage = pt.zeros_like(encoder_padding_mask) if coverage is None else coverage
+        if self.use_coverage:
+            coverage = pt.zeros_like(encoder_padding_mask) if coverage is None else coverage
 
         decoder_state = decoder_state.concatenated.unsqueeze(dim=1)
         encoder_padding_mask = encoder_padding_mask.unsqueeze(dim=2)
 
         encoder_features = self.Wh(encoder_outputs)
         decoder_features = self.Ws(decoder_state)
-        coverage_features = self.wc(coverage.unsqueeze(dim=2))
 
-        attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
+        if self.use_coverage:
+            coverage_features = self.wc(coverage.unsqueeze(dim=2))
+            attn_scores = self.v(pt.tanh(encoder_features + decoder_features + coverage_features))  # B-L-1
+        else:
+            attn_scores = self.v(pt.tanh(encoder_features + decoder_features))  # B-L-1
+
         masked_scores = attn_scores.masked_fill(encoder_padding_mask == 0, -float("inf"))  # broadcasting
         attn_dist = nn.functional.softmax(masked_scores, dim=1)  # B-L-1
 
         context = attn_dist * encoder_outputs  # broadcasting
         context = context.sum(dim=1)  # B-2H
         attn_dist = attn_dist.squeeze()
-        coverage += attn_dist
+
+        if self.use_coverage:
+            coverage += attn_dist
 
         return context, attn_dist, coverage
 
@@ -264,14 +242,9 @@ class PointerGeneratorDecoder(nn.Module):
 
         self.input_reducer = nn.Linear(2 * config.hidden_dim + embedding.embedding_dim, config.hidden_dim)
         self.lstm_cell = nn.LSTMCell(config.hidden_dim, config.hidden_dim)
-        self.attention = self.attention_class(config.hidden_dim)
-
+        self.attention = BahdanauAttention(config.hidden_dim, config.use_coverage)
         self.pgen = GenerationProbability(config.hidden_dim)
         self.vocab_dist = VocabularyDistribution(config.hidden_dim, config.vocab_size)
-
-    @property
-    def attention_class(self):
-        return BahdanauAttentionWithCoverage if self.use_coverage else BahdanauAttention
 
     def forward(
         self,
@@ -426,7 +399,7 @@ class AbstractiveSummarizationModel(LightningModule):
         final_dists, _ = self.model(batch)
         return final_dists
 
-    def _calc_primary_loss(self, final_dists: pt.Tensor, decoder_target_ids: pt.Tensor) -> pt.Tensor:
+    def calc_primary_loss(self, final_dists: pt.Tensor, decoder_target_ids: pt.Tensor) -> pt.Tensor:
         """Calculate the model primary loss for batch from final token distributions and targets."""
         return pt.stack(
             [
@@ -435,7 +408,7 @@ class AbstractiveSummarizationModel(LightningModule):
             ]
         ).mean()
 
-    def _calc_coverage_loss(self, attn_dists: pt.Tensor, decoder_padding_mask: pt.Tensor) -> pt.Tensor:
+    def calc_coverage_loss(self, attn_dists: pt.Tensor, decoder_padding_mask: pt.Tensor) -> pt.Tensor:
         """
         Calculate the coverage loss from the attention distributions. First, calculate the coverage losses  for each decoder step and then doubly averaging the resulting tensor of shape [batch_size, dec_max_seq_len] using the decoder padding mask into a scalar.
         """
@@ -455,9 +428,9 @@ class AbstractiveSummarizationModel(LightningModule):
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
         bs = len(final_dists)  # batch_size to fix dataloader warning arising from str dtype in batch
-        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
+        loss = self.calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
-            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
+            coverage_loss = self.calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=bs)
@@ -467,9 +440,9 @@ class AbstractiveSummarizationModel(LightningModule):
         decoder_padding_mask, decoder_target_ids = batch["decoder_padding_mask"], batch["decoder_target_ids"]
         final_dists, attn_dists = self.model(batch)
         bs = len(final_dists)  # batch_size to fix dataloader warning arising from str dtype in batch
-        loss = self._calc_primary_loss(final_dists, decoder_target_ids)
+        loss = self.calc_primary_loss(final_dists, decoder_target_ids)
         if self.model.use_coverage:
-            coverage_loss = self._calc_coverage_loss(attn_dists, decoder_padding_mask)
+            coverage_loss = self.calc_coverage_loss(attn_dists, decoder_padding_mask)
             loss += self.cov_loss_weight * coverage_loss
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=bs)
         return loss
@@ -490,10 +463,6 @@ class AbstractiveSummarizationModel(LightningModule):
             name=f"source-code-{logger.experiment.id}",
             include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml") or path.endswith(".json"),
         )
-
-    def on_validation_start(self) -> None:
-        """This will affect both fit and validation stage as validation is run also during training."""
-        remove_config_yaml()
 
 
 @timeit
